@@ -138,9 +138,9 @@ class Client: NSObject {
         }
     }
     
-    // MARK: - Private Methods
+    // MARK: - Internal Methods
     
-    private func discoverServer(port: Int) -> String? {
+    func discoverServer(port: Int) -> String? {
         // Try direct connections to common local addresses first
         let potentialServerAddresses = ["localhost", "127.0.0.1", "192.168.1.1", "10.0.0.1"]
         
@@ -161,19 +161,6 @@ class Client: NSObject {
             
             var isServerFound = false
             
-//            connection.stateUpdateHandler = { state in
-//                switch state {
-//                case .ready:
-//                    print("CLIENT: Connected directly to \(serverAddress)")
-//                    isServerFound = true
-//                    group.leave()
-//                case .failed, .cancelled:
-//                    group.leave()
-//                default:
-//                    break
-//                }
-//            }
-            // In Client.swift - Fix the connection stateUpdateHandler
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
