@@ -19,13 +19,15 @@ enum DataType: UInt16 {
 struct Student: Identifiable {
     let id: UUID
     var name: String
+    var studentID: String
     var image: NSImage?
     var connection: NWConnection
     var lastUpdate: Date
-    
+
     init(connection: NWConnection) {
         self.id = UUID()
         self.name = "Unknown"
+        self.studentID = ""
         self.image = nil
         self.connection = connection
         self.lastUpdate = Date()
@@ -42,6 +44,9 @@ class Server: NSObject, ObservableObject {
     
     @Published var students: [Student] = []
     @Published var isRunning: Bool = false
+    @Published var examName: String = ""
+    @Published var courseName: String = ""
+    @Published var roomNumber: String = ""
     
     func start(port: Int) {
         guard !isRunning else { return }
@@ -285,10 +290,14 @@ class Server: NSObject, ObservableObject {
         
         switch type {
         case .name:
-            if let name = String(data: data, encoding: .utf8) {
-                print("SERVER: Received name: \(name)")
+            if let payload = String(data: data, encoding: .utf8) {
+                let parts = payload.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+                let name = String(parts[0])
+                let studentID = parts.count > 1 ? String(parts[1]) : ""
+                print("SERVER: Received identity name=\(name) id=\(studentID)")
                 DispatchQueue.main.async {
                     self.students[index].name = name
+                    self.students[index].studentID = studentID
                 }
             }
             

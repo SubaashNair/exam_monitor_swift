@@ -1,0 +1,18 @@
+# Xcode build output
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+
+# Swift Package Manager
+.build/
+Packages/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Coverage / profiling
+*.profraw
+*.profdata
+
+# macOS
+.DS_Store

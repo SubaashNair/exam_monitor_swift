@@ -453,28 +453,34 @@ import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject var server: Server
-    @State private var gridColumns = [GridItem]()
+    @State private var gridColumns: [GridItem] = [GridItem(.flexible(), spacing: 16)]
     @State private var selectedStudent: Student? = nil
-    // Add timer to force refresh the UI every second
     @State private var refreshTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    
-    init() {
-        // Default to 3 columns
-        updateGridColumns(count: 3)
-    }
-    
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            HStack {
-                Text("Connected Students: \(server.students.count)")
-                    .font(.headline)
-                    .padding()
-                
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(server.examName.isEmpty ? "Exam Monitoring" : server.examName)
+                        .font(.headline)
+                    HStack(spacing: 8) {
+                        if !server.courseName.isEmpty {
+                            Text(server.courseName)
+                        }
+                        if !server.roomNumber.isEmpty {
+                            Text("• Room \(server.roomNumber)")
+                        }
+                        Text("• \(server.students.count) connected")
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                }
+
                 Spacer()
-                
+
                 // Column adjustment controls
-                HStack(spacing: 15) {
+                HStack(spacing: 12) {
                     Button(action: {
                         updateGridColumns(count: max(gridColumns.count - 1, 1))
                     }) {
@@ -483,10 +489,11 @@ struct DashboardView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     .disabled(gridColumns.count <= 1)
-                    
-                    Text("\(gridColumns.count) columns")
+
+                    Text("\(gridColumns.count) column\(gridColumns.count == 1 ? "" : "s")")
                         .font(.subheadline)
-                    
+                        .frame(minWidth: 70)
+
                     Button(action: {
                         updateGridColumns(count: min(gridColumns.count + 1, 6))
                     }) {
@@ -496,20 +503,21 @@ struct DashboardView: View {
                     .buttonStyle(PlainButtonStyle())
                     .disabled(gridColumns.count >= 6)
                 }
-                .padding(.horizontal)
-                
-                Button(action: {
-                    server.stop()
-                }) {
+
+                Button(action: { server.stop() }) {
                     Text("Stop Monitoring")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
                         .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, 16)
+                        .frame(height: 32)
                         .background(Color.red)
                         .cornerRadius(8)
                 }
-                .padding()
+                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
             .background(Color(NSColor.windowBackgroundColor))
             .overlay(
                 Rectangle()
@@ -606,14 +614,21 @@ struct StudentThumbnail: View {
                     .cornerRadius(4)
             }
             
-            HStack {
-                Text(student.name)
-                    .font(.headline)
-                    .lineLimit(1)
-                
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(student.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                    if !student.studentID.isEmpty {
+                        Text(student.studentID)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
                 Spacer()
-                
-                // Show when the image was last updated
+
                 Text(timeAgoString(from: student.lastUpdate))
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -622,10 +637,6 @@ struct StudentThumbnail: View {
         .padding(8)
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
-        // Add debugging modifier
-        .onAppear {
-            print("Rendering student: \(student.name), has image: \(student.image != nil), ID: \(student.id)")
-        }
     }
     
     private func timeAgoString(from date: Date) -> String {
@@ -648,10 +659,17 @@ struct StudentDetailView: View {
     
     var body: some View {
         VStack(spacing: 20) {
-            Text(student.name)
-                .font(.largeTitle)
-                .padding(.top)
-            
+            VStack(spacing: 4) {
+                Text(student.name)
+                    .font(.largeTitle)
+                if !student.studentID.isEmpty {
+                    Text(student.studentID)
+                        .font(.title3)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.top)
+
             if let image = student.image {
                 Image(nsImage: image)
                     .resizable()

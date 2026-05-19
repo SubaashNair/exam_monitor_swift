@@ -10,6 +10,8 @@ import Cocoa
 import Network
 import ScreenCaptureKit
 import AVFoundation
+import ImageIO
+import UniformTypeIdentifiers
 
 enum PacketType: UInt16 {
     case name = 0
@@ -30,10 +32,15 @@ class Client: NSObject {
     @Published var isConnected: Bool = false
     var isRunning: Bool { _isRunning }
     
-    func start(studentName: String, port: Int, updateUI: @escaping () -> Void) {
+    private var studentName: String = ""
+    private var studentID: String = ""
+
+    func start(studentName: String, studentID: String, port: Int, updateUI: @escaping () -> Void) {
         self.updateUI = updateUI
+        self.studentName = studentName
+        self.studentID = studentID
         _isRunning = true
-        
+
         // Initialize screen capture
         Task {
             do {
@@ -42,18 +49,18 @@ class Client: NSObject {
                 print("Failed to prepare screen capture: \(error)")
             }
         }
-        
+
         DispatchQueue.global(qos: .background).async { [weak self] in
             guard let self = self else { return }
-            
+
             var retryDelay: TimeInterval = 1.0
-            
+
             while self._isRunning {
                 self.isConnected = false
                 DispatchQueue.main.async {
                     updateUI()
                 }
-                
+
                 // Discover server
                 if let serverAddress = self.discoverServer(port: port) {
                     self.isConnected = true
@@ -61,22 +68,22 @@ class Client: NSObject {
                         updateUI()
                     }
                     retryDelay = 1.0
-                    
+
                     // Connect to server
                     let host = NWEndpoint.Host(serverAddress)
                     let nwPort = NWEndpoint.Port(integerLiteral: UInt16(port))
-                    
+
                     let parameters = NWParameters.tcp
                     parameters.allowLocalEndpointReuse = true
-                    
+
                     self.socket = NWConnection(host: host, port: nwPort, using: parameters)
-                    
+
                     self.socket?.stateUpdateHandler = { [weak self] state in
                         guard let self = self else { return }
                         switch state {
                         case .ready:
-                            // Connection established, send student name
-                            self.sendStudentName(name: studentName)
+                            // Send "name|studentID" in the existing name packet
+                            self.sendIdentity(name: self.studentName, studentID: self.studentID)
                             
                             // Start capturing screen
                             DispatchQueue.main.async {
@@ -301,11 +308,11 @@ class Client: NSObject {
         }
     }
     
-    private func sendStudentName(name: String) {
-        guard let data = name.data(using: .utf8) else {
-            return
-        }
-        
+    private func sendIdentity(name: String, studentID: String) {
+        // Payload format: "name|studentID". Server splits on '|';
+        // legacy single-segment payloads still parse correctly (id stays empty).
+        let payload = "\(name)|\(studentID)"
+        guard let data = payload.data(using: .utf8) else { return }
         sendData(type: .name, data: data)
     }
     
@@ -357,113 +364,137 @@ class Client: NSObject {
 }
 
 // MARK: - Screen Capture Manager
-class ScreenCaptureManager: NSObject, SCStreamOutput {
+class ScreenCaptureManager: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private var latestImage: CGImage?
+    private var frameID: UInt64 = 0
+    private var lastEncodedFrameID: UInt64 = 0
     private let imageSyncQueue = DispatchQueue(label: "com.client.screencapture.sync")
-    
+    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
     func prepareCapture() async throws {
-        // Get available content to capture
         let availableContent = try await SCShareableContent.current
-        
-        // Get main display
+
         guard let display = availableContent.displays.first else {
             throw NSError(domain: "ScreenCaptureError", code: 1, userInfo: [NSLocalizedDescriptionKey: "No display found"])
         }
-        
-        // Configure capture settings
+
         let config = SCStreamConfiguration()
-        config.width = 1440  // Capture at this resolution, will resize later
-        config.height = 900  // Approximate 16:9 aspect ratio
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 2)  // 0.5 seconds
-        config.queueDepth = 1
-        
-        // Set up filter to capture the display
+        config.width = 1440
+        config.height = 900
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 2) // 0.5s
+        config.queueDepth = 3
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.showsCursor = true
+
         let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-        
-        // Create capture stream
-        stream = SCStream(filter: filter, configuration: config, delegate: nil)
-        
-        // Set up stream output
-        try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: .global())
-        
-        // Start capture
+
+        stream = SCStream(filter: filter, configuration: config, delegate: self)
+        try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: .global(qos: .userInitiated))
         try await stream?.startCapture()
+        print("CLIENT: SCStream startCapture succeeded")
     }
-    
+
     func stopCapture() async {
-        if let stream = stream {
-            do {
-                try await stream.stopCapture()
-                self.stream = nil
-            } catch {
-                print("Error stopping capture: \(error)")
-            }
+        guard let stream = stream else { return }
+        do {
+            try await stream.stopCapture()
+        } catch {
+            print("CLIENT: Error stopping capture: \(error)")
         }
+        self.stream = nil
     }
-    
+
     func captureScreenAsJPEG(quality: CGFloat, width: CGFloat) async throws -> Data? {
-        // Try up to 1 second for a frame if needed
         for _ in 0..<20 {
             var currentImage: CGImage?
-            
-            // Use dispatch queue instead of locks
+            var currentID: UInt64 = 0
             imageSyncQueue.sync {
                 currentImage = latestImage
+                currentID = frameID
             }
-            
+
             if let cgImage = currentImage {
-                return convertToJPEG(cgImage: cgImage, quality: quality, targetWidth: width)
+                if currentID == lastEncodedFrameID {
+                    print("CLIENT: WARNING — re-encoding stale frame id=\(currentID); SCStream may have stalled")
+                } else {
+                    print("CLIENT: encoding fresh frame id=\(currentID)")
+                }
+                lastEncodedFrameID = currentID
+                return encodeJPEG(cgImage: cgImage, quality: quality, targetWidth: width)
             }
-            
-            try await Task.sleep(nanoseconds: 50_000_000) // 50ms
+
+            try await Task.sleep(nanoseconds: 50_000_000)
         }
-        
+
         throw NSError(domain: "ScreenCaptureError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for screen capture"])
     }
-    
-    private func convertToJPEG(cgImage: CGImage, quality: CGFloat, targetWidth: CGFloat) -> Data? {
-        // Create NSImage from CGImage
+
+    private func encodeJPEG(cgImage: CGImage, quality: CGFloat, targetWidth: CGFloat) -> Data? {
         let originalWidth = CGFloat(cgImage.width)
         let originalHeight = CGFloat(cgImage.height)
-        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: originalWidth, height: originalHeight))
-        
-        // Calculate new size maintaining aspect ratio
+        guard originalWidth > 0, originalHeight > 0 else { return nil }
+
         let aspectRatio = originalHeight / originalWidth
-        let targetHeight = targetWidth * aspectRatio
-        
-        // Resize image
-        let resizedImage = NSImage(size: NSSize(width: targetWidth, height: targetHeight))
-        resizedImage.lockFocus()
-        nsImage.draw(in: NSRect(x: 0, y: 0, width: targetWidth, height: targetHeight),
-                    from: NSRect(x: 0, y: 0, width: originalWidth, height: originalHeight),
-                    operation: .copy, fraction: 1.0)
-        resizedImage.unlockFocus()
-        
-        // Convert to JPEG
-        guard let tiffData = resizedImage.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData) else {
+        let outWidth = Int(targetWidth.rounded())
+        let outHeight = Int((targetWidth * aspectRatio).rounded())
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo: UInt32 = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+
+        guard let context = CGContext(
+            data: nil,
+            width: outWidth,
+            height: outHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
             return nil
         }
-        
-        return bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality])
+
+        context.interpolationQuality = .medium
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: outWidth, height: outHeight))
+
+        guard let resized = context.makeImage() else { return nil }
+
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else {
+            return nil
+        }
+        CGImageDestinationAddImage(dest, resized, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+
+        return data as Data
     }
-    
+
     // MARK: - SCStreamOutput
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen,
               let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
             return
         }
-        
-        // Convert to CGImage
-        let ciImage = CIImage(cvPixelBuffer: imageBuffer)
-        let context = CIContext()
-        if let cgImage = context.createCGImage(ciImage, from: ciImage.extent) {
-            // Update the latest image using dispatch queue instead of locks
-            imageSyncQueue.sync {
-                latestImage = cgImage
-            }
+
+        // Only process frames the system marked as having complete, displayable content.
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+           let statusRaw = attachments.first?[.status] as? Int,
+           let status = SCFrameStatus(rawValue: statusRaw),
+           status != .complete {
+            return
         }
+
+        let ciImage = CIImage(cvPixelBuffer: imageBuffer)
+        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else { return }
+
+        imageSyncQueue.sync {
+            latestImage = cgImage
+            frameID &+= 1
+        }
+    }
+
+    // MARK: - SCStreamDelegate
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        print("CLIENT: SCStream stopped with error: \(error)")
     }
 }
