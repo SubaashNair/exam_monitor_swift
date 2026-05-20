@@ -1,0 +1,13 @@
+[package]
+name = "exam-monitor-server"
+version.workspace = true
+edition.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+exam-monitor-core = { path = "../../../crates/exam-monitor-core" }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = [] }
+

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Exam Guard Client</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main id="join-screen" class="screen">
+      <section class="stack">
+        <header class="header">
+          <h1>Exam Guard Client</h1>
+          <p>Join a monitoring class to start sharing your screen.</p>
+        </header>
+
+        <form id="join-form" class="form">
+          <label>
+            <span>Full Name</span>
+            <input id="student-name" autocomplete="name" placeholder="e.g. Ada Lovelace" />
+          </label>
+          <label>
+            <span>Student ID</span>
+            <input id="student-id" autocomplete="off" placeholder="e.g. STU-2025-001" />
+          </label>
+          <label>
+            <span>Class Number</span>
+            <input id="room-number" inputmode="numeric" maxlength="4" placeholder="4-digit class code" />
+          </label>
+          <button id="start-button" type="submit" disabled>Start Sharing</button>
+          <p id="join-error" class="error" hidden></p>
+        </form>
+      </section>
+    </main>
+
+    <main id="dashboard-screen" class="screen hidden">
+      <section class="stack">
+        <header class="header">
+          <h1>Exam Guard Client</h1>
+          <p id="status-message">Looking for the server...</p>
+        </header>
+
+        <section class="status-panel">
+          <div class="status-row">
+            <span id="status-dot" class="dot waiting"></span>
+            <strong id="connection-label">Not connected</strong>
+          </div>
+          <dl>
+            <div>
+              <dt>Student name</dt>
+              <dd id="summary-name">-</dd>
+            </div>
+            <div>
+              <dt>Student ID</dt>
+              <dd id="summary-id">-</dd>
+            </div>
+            <div>
+              <dt>Class number</dt>
+              <dd id="summary-room">-</dd>
+            </div>
+          </dl>
+        </section>
+
+        <button id="stop-button" class="danger" type="button">Stop Sharing</button>
+      </section>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

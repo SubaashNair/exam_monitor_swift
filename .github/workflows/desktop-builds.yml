@@ -1,0 +1,114 @@
+name: Desktop Builds
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-22.04]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install server dependencies
+        working-directory: cross_platform/apps/server
+        run: npm ci
+
+      - name: Install client dependencies
+        working-directory: cross_platform/apps/client
+        run: npm ci
+
+      - name: Build server app bundle on macOS
+        if: runner.os == 'macOS'
+        working-directory: cross_platform/apps/server
+        run: npm run build:mac-app
+
+      - name: Build server app installer
+        if: runner.os != 'macOS'
+        working-directory: cross_platform/apps/server
+        run: npm run build
+
+      - name: Build client app bundle on macOS
+        if: runner.os == 'macOS'
+        working-directory: cross_platform/apps/client
+        run: npm run build:mac-app
+
+      - name: Build client app installer
+        if: runner.os != 'macOS'
+        working-directory: cross_platform/apps/client
+        run: npm run build
+
+      - name: Prepare macOS release assets
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p release-assets
+          ditto -c -k --sequesterRsrc --keepParent "cross_platform/target/release/bundle/macos/Exam Guard Server.app" "release-assets/Exam-Guard-Server-macOS-${{ runner.arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "cross_platform/target/release/bundle/macos/Exam Guard Client.app" "release-assets/Exam-Guard-Client-macOS-${{ runner.arch }}.zip"
+
+      - name: Prepare Linux release assets
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p release-assets
+          find cross_platform/target/release/bundle -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \) -exec cp {} release-assets/ \;
+          cp cross_platform/target/release/exam-monitor-server "release-assets/exam-monitor-server-linux-${{ runner.arch }}"
+          cp cross_platform/target/release/exam-monitor-client "release-assets/exam-monitor-client-linux-${{ runner.arch }}"
+
+      - name: Prepare Windows release assets
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          Get-ChildItem -Path cross_platform/target/release/bundle -Recurse -File -Include *.msi,*.exe | Copy-Item -Destination release-assets
+          Copy-Item cross_platform/target/release/exam-monitor-server.exe "release-assets/exam-monitor-server-windows-${{ runner.arch }}.exe"
+          Copy-Item cross_platform/target/release/exam-monitor-client.exe "release-assets/exam-monitor-client-windows-${{ runner.arch }}.exe"
+
+      - name: Upload desktop bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: exam-guard-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            release-assets/**
+          if-no-files-found: error
+
+      - name: Upload assets to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/**

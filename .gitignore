@@ -1,18 +1,6 @@
-# Xcode build output
-build/
-DerivedData/
-*.xcuserstate
-*.xcuserdatad/
-xcuserdata/
-
-# Swift Package Manager
-.build/
-Packages/
-*.xcodeproj/project.xcworkspace/xcuserdata/
-
-# Coverage / profiling
-*.profraw
-*.profdata
-
-# macOS
 .DS_Store
+.derivedData/
+cross_platform/target/
+cross_platform/apps/*/node_modules/
+cross_platform/apps/*/src-tauri/gen/
+cross_platform/.claude/

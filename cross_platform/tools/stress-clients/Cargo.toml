@@ -1,0 +1,9 @@
+[package]
+name = "stress-clients"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = "1"
+exam-monitor-core = { path = "../../crates/exam-monitor-core" }
+image = { version = "0.24", default-features = false, features = ["jpeg"] }

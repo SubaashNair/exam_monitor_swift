@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Exam Guard Server</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main id="home-screen" class="screen home">
+      <section class="stack">
+        <header class="header">
+          <h1>Exam Guard Server</h1>
+          <p>Create a monitoring class</p>
+        </header>
+
+        <form id="room-form" class="form">
+          <label>
+            <span>Exam Name</span>
+            <input id="exam-name" placeholder="e.g. Final Examination" />
+          </label>
+          <label>
+            <span>Course / Module</span>
+            <input id="course-name" placeholder="e.g. CS3010 Distributed Systems" />
+          </label>
+          <label>
+            <span>Class Number</span>
+            <div class="class-number-row">
+              <input id="room-number" inputmode="numeric" maxlength="4" placeholder="4-digit class code" />
+              <button id="generate-room" class="secondary" type="button">Generate</button>
+              <button id="copy-room" class="secondary" type="button" disabled>Copy</button>
+            </div>
+            <small id="copy-status" class="copy-status">Share this class number with students</small>
+          </label>
+          <button id="create-button" type="submit" disabled>Start Monitoring</button>
+          <p id="room-error" class="error" hidden></p>
+        </form>
+      </section>
+    </main>
+
+    <main id="dashboard-screen" class="dashboard hidden">
+      <header class="toolbar">
+        <section>
+          <h1 id="dashboard-title">Exam Monitoring</h1>
+          <p id="dashboard-subtitle">0 connected</p>
+        </section>
+
+        <div class="toolbar-actions">
+          <button id="remove-column" class="icon-button" type="button">-</button>
+          <span id="column-label">1 column</span>
+          <button id="add-column" class="icon-button" type="button">+</button>
+          <button id="stop-button" class="danger" type="button">Stop Monitoring</button>
+        </div>
+      </header>
+
+      <section id="empty-state" class="empty">Waiting for students to connect...</section>
+      <section id="student-grid" class="student-grid"></section>
+    </main>
+
+    <dialog id="student-dialog">
+      <article>
+        <header class="dialog-header">
+          <section>
+            <h2 id="dialog-name"></h2>
+            <p id="dialog-id"></p>
+          </section>
+          <button id="close-dialog" class="icon-button" type="button">x</button>
+        </header>
+        <div id="dialog-image-wrap" class="dialog-image-wrap"></div>
+        <footer class="dialog-actions">
+          <button type="button">Send Message</button>
+          <button type="button">Flag Student</button>
+          <button type="button">Disconnect</button>
+        </footer>
+      </article>
+    </dialog>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

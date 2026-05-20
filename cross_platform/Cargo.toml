@@ -1,0 +1,12 @@
+[workspace]
+members = [
+  "crates/exam-monitor-core",
+  "apps/client/src-tauri",
+  "apps/server/src-tauri",
+  "tools/stress-clients"
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
