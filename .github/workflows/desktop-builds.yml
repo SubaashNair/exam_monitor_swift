@@ -55,6 +55,20 @@ jobs:
         working-directory: cross_platform/apps/client
         run: npm ci
 
+      - name: Use Windows icon config
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $files = @(
+            "cross_platform/apps/server/src-tauri/tauri.conf.json",
+            "cross_platform/apps/client/src-tauri/tauri.conf.json"
+          )
+          foreach ($file in $files) {
+            $json = Get-Content $file -Raw | ConvertFrom-Json
+            $json.bundle.icon = @("icons/icon.ico")
+            $json | ConvertTo-Json -Depth 20 | Set-Content $file
+          }
+
       - name: Build server app bundle on macOS
         if: runner.os == 'macOS'
         working-directory: cross_platform/apps/server
