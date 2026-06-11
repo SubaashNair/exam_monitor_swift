@@ -37,44 +37,42 @@ struct Student: Identifiable {
 class Server: NSObject, ObservableObject {
     private let headerSize = 8
     private var tcpListener: NWListener?
-    private var udpSocket: NWConnection?
-    private let broadcastTimer = Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()
-    private var broadcastCancellable: AnyCancellable?
+    private var discoveryResponder: UDPDiscoveryResponder?
     private var port: Int = 0
-    
+
     @Published var students: [Student] = []
     @Published var isRunning: Bool = false
     @Published var examName: String = ""
     @Published var courseName: String = ""
     @Published var roomNumber: String = ""
-    
+
     func start(port: Int) {
         guard !isRunning else { return }
-        
+
         self.port = port
         setupTCPListener(port: port)
-        startUDPBroadcast(port: port)
-        
+        discoveryResponder = UDPDiscoveryResponder(port: UInt16(port))
+        discoveryResponder?.start()
+
         isRunning = true
     }
-    
+
     func stop() {
         guard isRunning else { return }
-        
+
         // Stop the TCP listener
         tcpListener?.cancel()
         tcpListener = nil
-        
-        // Stop the UDP broadcast
-        broadcastCancellable?.cancel()
-        udpSocket?.cancel()
-        udpSocket = nil
-        
+
+        // Stop UDP discovery
+        discoveryResponder?.stop()
+        discoveryResponder = nil
+
         // Disconnect all students
         for student in students {
             student.connection.cancel()
         }
-        
+
         DispatchQueue.main.async {
             self.students.removeAll()
             self.isRunning = false
@@ -139,47 +137,6 @@ class Server: NSObject, ObservableObject {
             
         } catch {
             print("Failed to create TCP listener: \(error)")
-        }
-    }
-    
-    private func startUDPBroadcast(port: Int) {
-        // Start periodic broadcasting
-        broadcastCancellable = broadcastTimer.sink { [weak self] _ in
-            guard let self = self, self.isRunning else { return }
-            self.sendBroadcast()
-        }
-    }
-    
-    private func sendBroadcast() {
-        // Create a simple broadcast message
-        let serverInfo = "server".data(using: .utf8)!
-        print("SERVER: Sending broadcast message")
-        
-        // Use multiple broadcast techniques to increase chances of success
-        let broadcastAddresses = ["255.255.255.255", "192.168.1.255", "10.0.0.255"]
-        for address in broadcastAddresses {
-            let broadcastHost = NWEndpoint.Host(address)
-            let broadcastPort = NWEndpoint.Port(integerLiteral: UInt16(port))
-            
-            // Create UDP parameters
-            let parameters = NWParameters.udp
-            parameters.allowLocalEndpointReuse = true
-            
-            let connection = NWConnection(host: broadcastHost, port: broadcastPort, using: parameters)
-            connection.start(queue: DispatchQueue.global())
-            
-            connection.send(content: serverInfo, completion: .contentProcessed { error in
-                if let error = error {
-                    print("SERVER: Error sending to \(address): \(error)")
-                } else {
-                    print("SERVER: Broadcast sent to \(address)")
-                }
-            })
-            
-            // Cancel after sending (we'll create a new connection next time)
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
-                connection.cancel()
-            }
         }
     }
     
@@ -332,4 +289,168 @@ class Server: NSObject, ObservableObject {
         students.removeAll { $0.connection === connection }
         print("SERVER: After removal: \(students.count) students")
     }
+}
+
+// MARK: - UDP Discovery
+
+/// Answers client "discover" probes and periodically beacons "server" so
+/// clients on the local network can find this machine.
+///
+/// Uses BSD sockets because Network.framework's NWConnection cannot enable
+/// SO_BROADCAST, so its sends to broadcast addresses fail.
+final class UDPDiscoveryResponder {
+    private let port: UInt16
+    private var socketFD: Int32 = -1
+    private let runningLock = NSLock()
+    private var _isRunning = false
+
+    private var isRunning: Bool {
+        runningLock.lock()
+        defer { runningLock.unlock() }
+        return _isRunning
+    }
+
+    init(port: UInt16) {
+        self.port = port
+    }
+
+    func start() {
+        socketFD = socket(AF_INET, SOCK_DGRAM, 0)
+        guard socketFD >= 0 else {
+            print("SERVER: failed to create UDP discovery socket: \(String(cString: strerror(errno)))")
+            return
+        }
+
+        var enable: Int32 = 1
+        if setsockopt(socketFD, SOL_SOCKET, SO_BROADCAST, &enable, socklen_t(MemoryLayout<Int32>.size)) < 0 {
+            print("SERVER: failed to enable UDP broadcast: \(String(cString: strerror(errno)))")
+        }
+        setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &enable, socklen_t(MemoryLayout<Int32>.size))
+
+        // Receive timeout so the loop can check shutdown and send beacons.
+        var timeout = timeval(tv_sec: 0, tv_usec: 500_000)
+        setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+        // Bind to the room port so client "discover" probes reach us. If the
+        // port is taken we continue in beacon-only mode.
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        address.sin_addr.s_addr = INADDR_ANY
+        let bindResult = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        if bindResult < 0 {
+            print("SERVER: UDP bind on port \(port) failed (\(String(cString: strerror(errno)))); beacon-only discovery")
+        }
+
+        runningLock.lock()
+        _isRunning = true
+        runningLock.unlock()
+
+        let thread = Thread { [weak self] in
+            self?.runLoop()
+        }
+        thread.name = "udp-discovery"
+        thread.start()
+    }
+
+    func stop() {
+        runningLock.lock()
+        _isRunning = false
+        runningLock.unlock()
+
+        if socketFD >= 0 {
+            close(socketFD)
+            socketFD = -1
+        }
+    }
+
+    private func runLoop() {
+        let targets = discoveryBroadcastAddresses()
+        print("SERVER: announcing room \(port) to \(targets)")
+
+        var buffer = [UInt8](repeating: 0, count: 64)
+        var lastBeacon = Date.distantPast
+
+        while isRunning {
+            if Date().timeIntervalSince(lastBeacon) >= 2.0 {
+                for address in targets {
+                    sendDatagram("server", toAddress: address, port: port)
+                }
+                lastBeacon = Date()
+            }
+
+            var source = sockaddr_in()
+            var sourceLength = socklen_t(MemoryLayout<sockaddr_in>.size)
+            let count = withUnsafeMutablePointer(to: &source) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    recvfrom(socketFD, &buffer, buffer.count, 0, $0, &sourceLength)
+                }
+            }
+
+            if count > 0, String(decoding: buffer[0..<count], as: UTF8.self) == "discover" {
+                let sourceIP = String(cString: inet_ntoa(source.sin_addr))
+                let sourcePort = UInt16(bigEndian: source.sin_port)
+                print("SERVER: discovery probe from \(sourceIP):\(sourcePort)")
+                sendDatagram("server", toAddress: sourceIP, port: sourcePort)
+            } else if count < 0, errno != EAGAIN, errno != EWOULDBLOCK, isRunning {
+                print("SERVER: UDP discovery receive failed: \(String(cString: strerror(errno)))")
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+        }
+    }
+
+    private func sendDatagram(_ message: String, toAddress address: String, port: UInt16) {
+        var target = sockaddr_in()
+        target.sin_family = sa_family_t(AF_INET)
+        target.sin_port = port.bigEndian
+        target.sin_addr.s_addr = inet_addr(address)
+
+        let payload = Array(message.utf8)
+        let sent = withUnsafePointer(to: &target) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                sendto(socketFD, payload, payload.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        if sent < 0 {
+            print("SERVER: UDP send to \(address):\(port) failed: \(String(cString: strerror(errno)))")
+        }
+    }
+}
+
+/// The directed broadcast address of every active non-loopback IPv4
+/// interface, plus the limited broadcast address as a fallback.
+func discoveryBroadcastAddresses() -> [String] {
+    var addresses = ["255.255.255.255"]
+
+    var interfaceList: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&interfaceList) == 0, let first = interfaceList else {
+        print("DISCOVERY: failed to enumerate network interfaces")
+        return addresses
+    }
+    defer { freeifaddrs(interfaceList) }
+
+    for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
+        let interface = pointer.pointee
+        let flags = Int32(interface.ifa_flags)
+        guard (flags & IFF_UP) != 0,
+              (flags & IFF_LOOPBACK) == 0,
+              (flags & IFF_BROADCAST) != 0,
+              let broadcastPointer = interface.ifa_dstaddr,
+              broadcastPointer.pointee.sa_family == sa_family_t(AF_INET) else {
+            continue
+        }
+
+        var broadcast = sockaddr_in()
+        memcpy(&broadcast, broadcastPointer, MemoryLayout<sockaddr_in>.size)
+        let address = String(cString: inet_ntoa(broadcast.sin_addr))
+        if !addresses.contains(address) {
+            addresses.append(address)
+        }
+    }
+
+    return addresses
 }

@@ -5,13 +5,61 @@
 //  Created by Subashanan Nair on 23/03/2025.
 //
 
+import Foundation
 import Testing
 @testable import server_monitor
 
 struct server_monitorTests {
 
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+    @Test("Discovery responder answers a UDP discover probe with server")
+    func respondsToDiscoveryProbe() throws {
+        let port: UInt16 = 42_353
+        let responder = UDPDiscoveryResponder(port: port)
+        responder.start()
+        defer { responder.stop() }
+
+        // Give the responder thread a moment to start listening.
+        Thread.sleep(forTimeInterval: 0.2)
+
+        let probeFD = Darwin.socket(AF_INET, SOCK_DGRAM, 0)
+        try #require(probeFD >= 0)
+        defer { close(probeFD) }
+
+        var timeout = timeval(tv_sec: 3, tv_usec: 0)
+        setsockopt(probeFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+        var target = sockaddr_in()
+        target.sin_family = sa_family_t(AF_INET)
+        target.sin_port = port.bigEndian
+        target.sin_addr.s_addr = inet_addr("127.0.0.1")
+
+        let probe = Array("discover".utf8)
+        let sent = withUnsafePointer(to: &target) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                sendto(probeFD, probe, probe.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        #expect(sent == probe.count)
+
+        var buffer = [UInt8](repeating: 0, count: 64)
+        var source = sockaddr_in()
+        var sourceLength = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let received = withUnsafeMutablePointer(to: &source) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                recvfrom(probeFD, &buffer, buffer.count, 0, $0, &sourceLength)
+            }
+        }
+
+        try #require(received > 0)
+        #expect(String(decoding: buffer[0..<received], as: UTF8.self) == "server")
+        #expect(UInt16(bigEndian: source.sin_port) == port)
+    }
+
+    @Test("Broadcast targets always include the limited broadcast address")
+    func broadcastTargetsIncludeLimitedBroadcast() {
+        let targets = discoveryBroadcastAddresses()
+        #expect(targets.contains("255.255.255.255"))
+        #expect(Set(targets).count == targets.count)
     }
 
 }

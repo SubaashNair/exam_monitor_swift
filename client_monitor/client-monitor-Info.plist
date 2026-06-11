@@ -4,5 +4,7 @@
 <dict>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>This app needs screen recording permission to share your screen with the exam proctor.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Exam Guard Client searches your local network for the exam monitoring server.</string>
 </dict>
 </plist>
