@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "exam-monitor-client"
-version = "0.1.1"
+version = "0.1.3"
 dependencies = [
  "exam-monitor-core",
  "serde",
@@ -850,10 +850,11 @@ dependencies = [
 
 [[package]]
 name = "exam-monitor-core"
-version = "0.1.1"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "if-addrs",
  "image",
  "screenshots",
  "serde",
@@ -861,7 +862,7 @@ dependencies = [
 
 [[package]]
 name = "exam-monitor-server"
-version = "0.1.1"
+version = "0.1.3"
 dependencies = [
  "exam-monitor-core",
  "serde",
@@ -1672,6 +1673,16 @@ checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
+]
+
+[[package]]
+name = "if-addrs"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69b2eeee38fef3aa9b4cc5f1beea8a2444fc00e7377cafae396de3f5c2065e24"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3214,7 +3225,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stress-clients"
-version = "0.1.1"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "exam-monitor-core",
