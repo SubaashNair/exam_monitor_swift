@@ -1,3 +1,7 @@
+// Hide the Windows console window in release builds. Without this attribute
+// the packaged .exe is built for the console subsystem and pops a terminal.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use exam_monitor_core::{ServerRuntime, ServerSnapshot};
 use std::sync::Mutex;
 use tauri::State;

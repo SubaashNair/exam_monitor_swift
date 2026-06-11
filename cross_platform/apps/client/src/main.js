@@ -6,6 +6,7 @@ const form = document.querySelector("#join-form");
 const nameInput = document.querySelector("#student-name");
 const idInput = document.querySelector("#student-id");
 const roomInput = document.querySelector("#room-number");
+const serverIpInput = document.querySelector("#server-ip");
 const startButton = document.querySelector("#start-button");
 const stopButton = document.querySelector("#stop-button");
 const joinError = document.querySelector("#join-error");
@@ -75,7 +76,8 @@ form.addEventListener("submit", async (event) => {
     await invoke("start_client", {
       studentName: nameInput.value.trim(),
       studentId: idInput.value.trim(),
-      roomNumber: roomInput.value.trim()
+      roomNumber: roomInput.value.trim(),
+      serverIp: serverIpInput.value.trim() || null
     });
 
     summaryName.textContent = nameInput.value.trim();

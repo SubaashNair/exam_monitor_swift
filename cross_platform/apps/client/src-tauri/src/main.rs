@@ -1,4 +1,9 @@
+// Hide the Windows console window in release builds. Without this attribute
+// the packaged .exe is built for the console subsystem and pops a terminal.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use exam_monitor_core::{ClientRuntime, ClientSnapshot};
+use std::net::IpAddr;
 use std::sync::Mutex;
 use tauri::State;
 
@@ -13,8 +18,10 @@ fn start_client(
     student_name: String,
     student_id: String,
     room_number: String,
+    server_ip: Option<String>,
 ) -> Result<(), String> {
     let port = parse_room_number(&room_number)?;
+    let server_ip = parse_server_ip(server_ip.as_deref())?;
     let mut runtime = state
         .runtime
         .lock()
@@ -24,8 +31,18 @@ fn start_client(
         existing.stop();
     }
 
-    *runtime = Some(ClientRuntime::start(student_name, student_id, port));
+    *runtime = Some(ClientRuntime::start(student_name, student_id, port, server_ip));
     Ok(())
+}
+
+fn parse_server_ip(value: Option<&str>) -> Result<Option<IpAddr>, String> {
+    match value.map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(text) => text
+            .parse::<IpAddr>()
+            .map(Some)
+            .map_err(|_| String::from("server IP must be a valid IP address, e.g. 192.168.0.10")),
+    }
 }
 
 #[tauri::command]

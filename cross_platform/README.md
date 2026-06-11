@@ -52,6 +52,25 @@ npm run tauri dev
 
 Use the same 4-digit room number in both apps.
 
+## How Discovery Works
+
+The client finds the server in three ways, in order:
+
+1. Direct connection to a manually entered server IP (the optional "Server IP" field in the client).
+2. UDP probe: the client broadcasts `discover` to every local subnet's broadcast address on the room port; the server replies `server` directly to the client.
+3. Server beacon: the server broadcasts `server` every 2 seconds to the same addresses, and the client listens on the room port.
+
+The teacher's IP for manual entry is shown by `ipconfig` (Windows) or System Settings → Network (macOS).
+
+## Network Troubleshooting
+
+If the client stays on "Looking for the server...":
+
+- **Windows Firewall (client and server on Windows):** the first launch shows a firewall prompt — click "Allow access". If it was dismissed, allow the app under Windows Security → Firewall & network protection → Allow an app through firewall, for both Private and Public profiles.
+- **macOS Local Network permission (macOS 15+):** the first launch asks for Local Network access — click "Allow". Re-enable later under System Settings → Privacy & Security → Local Network.
+- **macOS firewall:** if enabled, allow incoming connections for the server app when prompted.
+- **Both machines must be on the same network/subnet.** Guest Wi-Fi and networks with "AP/client isolation" block device-to-device traffic entirely — on such networks, use the manual Server IP field; if that also fails, the network itself is blocking the connection.
+
 ## Build Installers
 
 The Tauri bundle step is enabled for both desktop apps. Build each app from its package folder:

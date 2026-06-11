@@ -1,3 +1,4 @@
+use crate::discovery::{discovery_targets, DISCOVER_MESSAGE, SERVER_MESSAGE};
 use crate::protocol::{parse_identity, read_packet, PacketType};
 use base64::{engine::general_purpose, Engine};
 use serde::Serialize;
@@ -7,7 +8,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct StudentSnapshot {
@@ -50,7 +51,7 @@ impl ServerRuntime {
 
         let broadcast_worker = {
             let running = Arc::clone(&running);
-            thread::spawn(move || run_udp_broadcast(port, running))
+            thread::spawn(move || run_udp_discovery(port, running))
         };
 
         Self {
@@ -140,28 +141,73 @@ fn run_tcp_listener(
     }
 }
 
-fn run_udp_broadcast(port: u16, running: Arc<AtomicBool>) {
-    let socket = match UdpSocket::bind(("0.0.0.0", 0)) {
+fn run_udp_discovery(port: u16, running: Arc<AtomicBool>) {
+    // Bind to the room port so client "discover" probes reach us. Fall back to
+    // an ephemeral port (beacon-only mode) if the room port is taken.
+    let socket = match UdpSocket::bind(("0.0.0.0", port)) {
         Ok(socket) => socket,
         Err(error) => {
-            eprintln!("SERVER: failed to bind UDP broadcast socket: {error}");
-            return;
+            eprintln!(
+                "SERVER: failed to bind UDP discovery socket on port {port}: {error}; \
+                 falling back to beacon-only discovery"
+            );
+            match UdpSocket::bind(("0.0.0.0", 0)) {
+                Ok(socket) => socket,
+                Err(error) => {
+                    eprintln!("SERVER: failed to bind UDP beacon socket: {error}");
+                    return;
+                }
+            }
         }
     };
 
-    let _ = socket.set_broadcast(true);
-    let targets = [
-        format!("255.255.255.255:{port}"),
-        format!("192.168.1.255:{port}"),
-        format!("10.0.0.255:{port}"),
-    ];
+    if let Err(error) = socket.set_broadcast(true) {
+        eprintln!("SERVER: failed to enable UDP broadcast: {error}");
+    }
+    if let Err(error) = socket.set_read_timeout(Some(Duration::from_millis(500))) {
+        eprintln!("SERVER: failed to set UDP read timeout: {error}");
+    }
+
+    let targets = discovery_targets(port);
+    eprintln!("SERVER: announcing room {port} to {targets:?}");
+
+    let mut buffer = [0_u8; 64];
+    let mut last_beacon: Option<Instant> = None;
+    let mut beacon_error_logged = false;
 
     while running.load(Ordering::SeqCst) {
-        for target in &targets {
-            let _ = socket.send_to(b"server", target);
+        let beacon_due = last_beacon
+            .map(|at| at.elapsed() >= Duration::from_secs(2))
+            .unwrap_or(true);
+
+        if beacon_due {
+            for target in &targets {
+                if let Err(error) = socket.send_to(SERVER_MESSAGE, target) {
+                    if !beacon_error_logged {
+                        eprintln!("SERVER: beacon to {target} failed: {error}");
+                        beacon_error_logged = true;
+                    }
+                }
+            }
+            last_beacon = Some(Instant::now());
         }
 
-        thread::sleep(Duration::from_secs(2));
+        match socket.recv_from(&mut buffer) {
+            Ok((count, source)) if &buffer[..count] == DISCOVER_MESSAGE => {
+                eprintln!("SERVER: discovery probe from {source}");
+                if let Err(error) = socket.send_to(SERVER_MESSAGE, source) {
+                    eprintln!("SERVER: failed to answer probe from {source}: {error}");
+                }
+            }
+            Ok(_) => {}
+            Err(error)
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    || error.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(error) => {
+                eprintln!("SERVER: UDP discovery receive failed: {error}");
+                thread::sleep(Duration::from_millis(300));
+            }
+        }
     }
 }
 
@@ -274,6 +320,34 @@ mod tests {
     use super::*;
     use crate::protocol::{identity_payload, write_packet};
     use std::net::TcpStream;
+
+    #[test]
+    fn server_answers_udp_discovery_probe() {
+        let port = 42_351;
+        let mut runtime = ServerRuntime::start(
+            String::from("Exam"),
+            String::from("Course"),
+            port.to_string(),
+            port,
+        );
+
+        thread::sleep(Duration::from_millis(200));
+
+        let probe = UdpSocket::bind(("127.0.0.1", 0)).unwrap();
+        probe
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        probe
+            .send_to(DISCOVER_MESSAGE, ("127.0.0.1", port))
+            .unwrap();
+
+        let mut buffer = [0_u8; 64];
+        let (count, source) = probe.recv_from(&mut buffer).unwrap();
+        runtime.stop();
+
+        assert_eq!(&buffer[..count], SERVER_MESSAGE);
+        assert_eq!(source.port(), port);
+    }
 
     #[test]
     fn server_keeps_registered_picture_connection_open() {
