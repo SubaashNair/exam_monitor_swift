@@ -73,8 +73,20 @@ pub fn read_packet<R: Read>(reader: &mut R) -> io::Result<Packet> {
         ));
     }
 
-    let mut payload = vec![0_u8; payload_len as usize];
-    reader.read_exact(&mut payload)?;
+    // Grow the buffer as bytes actually arrive rather than trusting the
+    // claimed length up front — a stalled connection claiming 20MB would
+    // otherwise pin 20MB of RAM while sending nothing.
+    let mut payload = Vec::with_capacity((payload_len as usize).min(64 * 1024));
+    reader
+        .by_ref()
+        .take(u64::from(payload_len))
+        .read_to_end(&mut payload)?;
+    if payload.len() != payload_len as usize {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "connection closed mid-payload",
+        ));
+    }
 
     Ok(Packet {
         packet_type,

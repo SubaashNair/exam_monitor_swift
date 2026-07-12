@@ -559,7 +559,10 @@ struct DashboardView: View {
             }
         }
         .sheet(item: $selectedStudent) { student in
-            StudentDetailView(student: student)
+            // Look up by id inside the sheet so the feed stays live,
+            // not a frozen copy of the struct captured at tap time.
+            StudentDetailView(studentID: student.id, fallback: student)
+                .environmentObject(server)
                 .frame(width: 800, height: 600)
         }
         // Add debugging modifiers
@@ -655,8 +658,14 @@ struct StudentThumbnail: View {
 }
 
 struct StudentDetailView: View {
-    let student: Student
-    
+    @EnvironmentObject var server: Server
+    let studentID: UUID
+    let fallback: Student
+
+    private var student: Student {
+        server.students.first { $0.id == studentID } ?? fallback
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             VStack(spacing: 4) {

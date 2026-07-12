@@ -2,13 +2,23 @@ use crate::discovery::{discovery_targets, DISCOVER_MESSAGE, SERVER_MESSAGE};
 use crate::protocol::{parse_identity, read_packet, PacketType};
 use base64::{engine::general_purpose, Engine};
 use serde::Serialize;
-use std::net::{TcpListener, TcpStream, UdpSocket};
+use std::collections::HashMap;
+use std::net::{Shutdown, TcpListener, TcpStream, UdpSocket};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+/// Drop a connection that sends nothing for this long (frames arrive every
+/// 200ms, so this also reaps clients whose laptop slept or lost Wi-Fi
+/// without a TCP reset).
+const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Cap concurrent connections so a flood cannot exhaust threads/memory.
+const MAX_CONNECTIONS: usize = 64;
+
+type Connections = Arc<Mutex<HashMap<u64, TcpStream>>>;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct StudentSnapshot {
@@ -31,6 +41,7 @@ pub struct ServerSnapshot {
 pub struct ServerRuntime {
     running: Arc<AtomicBool>,
     students: Arc<Mutex<Vec<StudentSnapshot>>>,
+    connections: Connections,
     exam_name: String,
     course_name: String,
     room_number: String,
@@ -41,12 +52,14 @@ impl ServerRuntime {
     pub fn start(exam_name: String, course_name: String, room_number: String, port: u16) -> Self {
         let running = Arc::new(AtomicBool::new(true));
         let students = Arc::new(Mutex::new(Vec::new()));
+        let connections: Connections = Arc::new(Mutex::new(HashMap::new()));
 
         let accept_worker = {
             let running = Arc::clone(&running);
             let students = Arc::clone(&students);
+            let connections = Arc::clone(&connections);
 
-            thread::spawn(move || run_tcp_listener(port, running, students))
+            thread::spawn(move || run_tcp_listener(port, running, students, connections))
         };
 
         let broadcast_worker = {
@@ -57,6 +70,7 @@ impl ServerRuntime {
         Self {
             running,
             students,
+            connections,
             exam_name,
             course_name,
             room_number,
@@ -66,6 +80,14 @@ impl ServerRuntime {
 
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
+
+        // Shut down every student socket so their handler threads unblock
+        // and students see a clean disconnect instead of a silent orphan.
+        if let Ok(connections) = self.connections.lock() {
+            for stream in connections.values() {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
+        }
 
         for worker in self.workers.drain(..) {
             let _ = worker.join();
@@ -101,6 +123,7 @@ fn run_tcp_listener(
     port: u16,
     running: Arc<AtomicBool>,
     students: Arc<Mutex<Vec<StudentSnapshot>>>,
+    connections: Connections,
 ) {
     let listener = match TcpListener::bind(("0.0.0.0", port)) {
         Ok(listener) => listener,
@@ -117,6 +140,15 @@ fn run_tcp_listener(
     while running.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, peer_addr)) => {
+                let at_capacity = connections
+                    .lock()
+                    .map(|map| map.len() >= MAX_CONNECTIONS)
+                    .unwrap_or(true);
+                if at_capacity {
+                    eprintln!("SERVER: rejecting connection from {peer_addr}: at capacity");
+                    continue;
+                }
+
                 let id = next_id;
                 next_id += 1;
                 eprintln!("SERVER: accepted TCP connection {id} from {peer_addr}");
@@ -125,10 +157,17 @@ fn run_tcp_listener(
                     eprintln!("SERVER: failed to set connection {id} blocking mode: {error}");
                     continue;
                 }
+                // Idle sockets get reaped instead of blocking a thread forever.
+                let _ = stream.set_read_timeout(Some(IDLE_TIMEOUT));
+
+                if let (Ok(clone), Ok(mut map)) = (stream.try_clone(), connections.lock()) {
+                    map.insert(id, clone);
+                }
 
                 let running = Arc::clone(&running);
                 let students = Arc::clone(&students);
-                thread::spawn(move || handle_student(id, stream, running, students));
+                let connections = Arc::clone(&connections);
+                thread::spawn(move || handle_student(id, stream, running, students, connections));
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(100));
@@ -216,6 +255,7 @@ fn handle_student(
     mut stream: TcpStream,
     running: Arc<AtomicBool>,
     students: Arc<Mutex<Vec<StudentSnapshot>>>,
+    connections: Connections,
 ) {
     let mut is_registered = false;
     let mut received_frames = 0_u64;
@@ -272,6 +312,10 @@ fn handle_student(
     if let Ok(mut students) = students.lock() {
         students.retain(|student| student.id != id);
     }
+    // Deregister so the fd is released and stop() doesn't touch dead sockets.
+    if let Ok(mut connections) = connections.lock() {
+        connections.remove(&id);
+    }
 }
 
 fn update_student(
@@ -320,6 +364,40 @@ mod tests {
     use super::*;
     use crate::protocol::{identity_payload, write_packet};
     use std::net::TcpStream;
+
+    #[test]
+    fn stop_disconnects_connected_students() {
+        let port = 42_355;
+        let mut runtime = ServerRuntime::start(
+            String::from("Exam"),
+            String::from("Course"),
+            port.to_string(),
+            port,
+        );
+
+        thread::sleep(Duration::from_millis(200));
+
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write_packet(
+            &mut stream,
+            PacketType::Name,
+            &identity_payload("Probe Student", "PROBE-2"),
+        )
+        .unwrap();
+        thread::sleep(Duration::from_millis(200));
+
+        runtime.stop();
+
+        // The server must have shut our socket down: a read now returns
+        // EOF/error instead of blocking on an orphaned connection.
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut buffer = [0_u8; 8];
+        use std::io::Read;
+        let result = stream.read(&mut buffer);
+        assert!(matches!(result, Ok(0) | Err(_)), "socket still open: {result:?}");
+    }
 
     #[test]
     fn server_answers_udp_discovery_probe() {

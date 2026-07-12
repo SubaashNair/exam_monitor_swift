@@ -38,7 +38,13 @@ class Server: NSObject, ObservableObject {
     private let headerSize = 8
     private var tcpListener: NWListener?
     private var discoveryResponder: UDPDiscoveryResponder?
+    private var staleSweepTimer: Timer?
     private var port: Int = 0
+
+    // Clients stream a frame every 0.5s; no frame for 30s means the laptop
+    // slept or Wi-Fi dropped without a TCP reset. Drop it from the dashboard
+    // instead of showing a stale "live" tile forever.
+    private let staleTimeout: TimeInterval = 30
 
     @Published var students: [Student] = []
     @Published var isRunning: Bool = false
@@ -54,7 +60,23 @@ class Server: NSObject, ObservableObject {
         discoveryResponder = UDPDiscoveryResponder(port: UInt16(port))
         discoveryResponder?.start()
 
+        staleSweepTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            self?.dropStaleStudents()
+        }
+
         isRunning = true
+    }
+
+    private func dropStaleStudents() {
+        let cutoff = Date().addingTimeInterval(-staleTimeout)
+        let stale = students.filter { $0.lastUpdate < cutoff }
+        guard !stale.isEmpty else { return }
+
+        for student in stale {
+            print("SERVER: dropping stale student \(student.name) (no frames for \(Int(staleTimeout))s)")
+            student.connection.cancel()
+        }
+        students.removeAll { student in stale.contains { $0.id == student.id } }
     }
 
     func stop() {
@@ -67,6 +89,9 @@ class Server: NSObject, ObservableObject {
         // Stop UDP discovery
         discoveryResponder?.stop()
         discoveryResponder = nil
+
+        staleSweepTimer?.invalidate()
+        staleSweepTimer = nil
 
         // Disconnect all students
         for student in students {
@@ -160,7 +185,17 @@ class Server: NSObject, ObservableObject {
             if data.count == self.headerSize && data.prefix(2) == Data("HE".utf8) {
                 let type = data.withUnsafeBytes { $0.load(fromByteOffset: 2, as: UInt16.self).bigEndian }
                 let length = data.withUnsafeBytes { $0.load(fromByteOffset: 4, as: UInt32.self).bigEndian }
-                
+
+                // Reject absurd payload claims (matches the Rust 20MB cap).
+                guard length <= 20 * 1024 * 1024 else {
+                    print("SERVER: dropping connection claiming \(length) byte payload")
+                    student.connection.cancel()
+                    DispatchQueue.main.async {
+                        self.removeStudent(with: student.connection)
+                    }
+                    return
+                }
+
                 // Read payload
                 student.connection.receive(minimumIncompleteLength: Int(length), maximumLength: Int(length)) { [weak self] content, _, _, error in
                     guard let self = self, let payloadData = content, error == nil else {
@@ -182,8 +217,13 @@ class Server: NSObject, ObservableObject {
                     }
                 }
             } else {
-                // Continue receiving data in case of invalid header
-                self.receiveData(from: student)
+                // Bad magic means the stream is desynced; there is no way to
+                // resync a length-prefixed stream, so drop the connection.
+                print("SERVER: invalid packet header, dropping connection")
+                student.connection.cancel()
+                DispatchQueue.main.async {
+                    self.removeStudent(with: student.connection)
+                }
             }
         }
     }
