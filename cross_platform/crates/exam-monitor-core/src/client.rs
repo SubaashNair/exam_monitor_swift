@@ -43,8 +43,6 @@ impl ClientRuntime {
             let status = Arc::clone(&status);
 
             thread::spawn(move || {
-                let mut retry_delay = Duration::from_secs(1);
-
                 while running.load(Ordering::SeqCst) {
                     connected.store(false, Ordering::SeqCst);
                     set_status(&status, "Looking for the server...");
@@ -57,7 +55,6 @@ impl ClientRuntime {
 
                     match discovered {
                         Some(server_ip) => {
-                            retry_delay = Duration::from_secs(1);
                             let addr = SocketAddr::new(server_ip, port);
                             set_status(&status, format!("Connecting to {addr}..."));
 
@@ -117,8 +114,9 @@ impl ClientRuntime {
                             }
                         }
                         None => {
-                            thread::sleep(retry_delay);
-                            retry_delay = (retry_delay * 2).min(Duration::from_secs(8));
+                            // Only happens on stop or socket failure; the
+                            // sleep just guards against a bind-error spin.
+                            thread::sleep(Duration::from_secs(1));
                         }
                     }
                 }
@@ -205,12 +203,6 @@ fn stream_frames(
 }
 
 fn discover_server(port: u16, running: &Arc<AtomicBool>) -> Option<IpAddr> {
-    // Fast path: server running on this machine.
-    let localhost = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
-    if TcpStream::connect_timeout(&localhost, Duration::from_millis(300)).is_ok() {
-        return Some(localhost.ip());
-    }
-
     // Bind to the room port so we can hear the server's broadcast beacons.
     // Fall back to an ephemeral port (probe replies still reach us there)
     // when the room port is taken, e.g. by a server on the same machine.
@@ -236,14 +228,19 @@ fn discover_server(port: u16, running: &Arc<AtomicBool>) -> Option<IpAddr> {
     }
 
     let targets = discovery_targets(port);
+    let localhost = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
     let mut probe_error_logged = false;
     let mut buffer = [0_u8; 64];
 
-    // Probe roughly once per second for ~10 seconds, listening in between for
-    // either a direct probe reply or a periodic server beacon.
-    for _ in 0..10 {
-        if !running.load(Ordering::SeqCst) {
-            return None;
+    // Probe roughly once per second until the server appears or the client
+    // stops. Giving up and sleeping between search rounds (the old design)
+    // left deaf gaps where a freshly started room went unnoticed for up to
+    // 8 seconds; continuous listening caps connect latency at ~1 second.
+    while running.load(Ordering::SeqCst) {
+        // Server on this machine? A refused connect returns instantly, so
+        // this stays cheap when there isn't one.
+        if TcpStream::connect_timeout(&localhost, Duration::from_millis(300)).is_ok() {
+            return Some(localhost.ip());
         }
 
         for target in &targets {
@@ -282,5 +279,46 @@ fn discover_server(port: u16, running: &Arc<AtomicBool>) -> Option<IpAddr> {
 fn set_status(status: &Arc<Mutex<String>>, value: impl Into<String>) {
     if let Ok(mut current) = status.lock() {
         *current = value.into();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::ServerRuntime;
+
+    #[test]
+    fn discovery_finds_server_started_after_search_began() {
+        let port = 42_357;
+        let running = Arc::new(AtomicBool::new(true));
+
+        // Watchdog so a regression fails the test instead of hanging it.
+        {
+            let running = Arc::clone(&running);
+            thread::spawn(move || {
+                thread::sleep(Duration::from_secs(10));
+                running.store(false, Ordering::SeqCst);
+            });
+        }
+
+        let searcher = {
+            let running = Arc::clone(&running);
+            thread::spawn(move || discover_server(port, &running))
+        };
+
+        // The student is already searching; the teacher starts the room late.
+        thread::sleep(Duration::from_millis(1_500));
+        let mut runtime = ServerRuntime::start(
+            String::from("Exam"),
+            String::from("Course"),
+            port.to_string(),
+            port,
+        );
+
+        let found = searcher.join().unwrap();
+        runtime.stop();
+        running.store(false, Ordering::SeqCst);
+
+        assert!(found.is_some(), "discovery never noticed the late-started server");
     }
 }
