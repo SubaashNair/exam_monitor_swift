@@ -232,3 +232,7 @@ closeDialog.addEventListener("click", () => dialog.close());
 
 updateColumns(columns);
 updateFormState();
+
+invoke("app_version").then((version) => {
+  document.querySelector("#app-version").textContent = `v${version}`;
+});

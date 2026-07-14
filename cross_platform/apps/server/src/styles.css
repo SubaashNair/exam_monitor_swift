@@ -278,3 +278,12 @@ dialog article {
 .dialog-image-wrap img {
   object-fit: contain;
 }
+
+.app-version {
+  position: fixed;
+  bottom: 8px;
+  right: 12px;
+  font-size: 11px;
+  color: rgba(128, 128, 128, 0.8);
+  pointer-events: none;
+}

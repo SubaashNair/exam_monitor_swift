@@ -70,6 +70,11 @@ fn server_status(state: State<'_, ServerState>) -> Result<ServerSnapshot, String
         }))
 }
 
+#[tauri::command]
+fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
 fn parse_room_number(value: &str) -> Result<u16, String> {
     let port: u16 = value
         .parse()
@@ -88,7 +93,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             start_server,
             stop_server,
-            server_status
+            server_status,
+            app_version
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Exam Guard Server");

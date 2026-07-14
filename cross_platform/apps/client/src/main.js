@@ -99,3 +99,7 @@ stopButton.addEventListener("click", async () => {
 
 updateFormState();
 
+
+invoke("app_version").then((version) => {
+  document.querySelector("#app-version").textContent = `v${version}`;
+});

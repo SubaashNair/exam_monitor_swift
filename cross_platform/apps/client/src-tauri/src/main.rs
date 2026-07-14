@@ -35,6 +35,11 @@ fn start_client(
     Ok(())
 }
 
+#[tauri::command]
+fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
 fn parse_server_ip(value: Option<&str>) -> Result<Option<IpAddr>, String> {
     match value.map(str::trim) {
         None | Some("") => Ok(None),
@@ -94,7 +99,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             start_client,
             stop_client,
-            client_status
+            client_status,
+            app_version
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Exam Guard Client");
