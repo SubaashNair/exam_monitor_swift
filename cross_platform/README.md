@@ -62,6 +62,25 @@ The client finds the server in three ways, in order:
 
 The teacher's IP for manual entry is shown by `ipconfig` (Windows) or System Settings → Network (macOS).
 
+## macOS: "app is damaged and can't be opened"
+
+The apps are not notarized with Apple (that requires a paid developer
+account), so macOS quarantines the downloaded zip and can refuse to open the
+app. Fixes, in order of preference:
+
+1. After copying the app to Applications, run once in Terminal:
+
+   ```bash
+   xattr -cr "/Applications/Exam Guard Client.app"
+   ```
+
+2. Or distribute the app on a USB stick — files copied from USB are not
+   quarantined, so the app opens normally.
+
+Releases from v0.1.5 onward are ad-hoc signed in CI, which downgrades the
+error from "damaged" to an "unidentified developer" warning that can be
+bypassed with right-click → Open.
+
 ## Network Troubleshooting
 
 If the client stays on "Looking for the server...":

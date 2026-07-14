@@ -93,6 +93,13 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           mkdir -p release-assets
+          # Ad-hoc sign the full bundle: without this the app only carries the
+          # linker's binary signature (no resource seal) and macOS reports the
+          # downloaded app as "damaged".
+          codesign --force --deep --sign - "cross_platform/target/release/bundle/macos/Exam Guard Server.app"
+          codesign --force --deep --sign - "cross_platform/target/release/bundle/macos/Exam Guard Client.app"
+          codesign --verify --deep --strict "cross_platform/target/release/bundle/macos/Exam Guard Server.app"
+          codesign --verify --deep --strict "cross_platform/target/release/bundle/macos/Exam Guard Client.app"
           ditto -c -k --sequesterRsrc --keepParent "cross_platform/target/release/bundle/macos/Exam Guard Server.app" "release-assets/Exam-Guard-Server-macOS-${{ runner.arch }}.zip"
           ditto -c -k --sequesterRsrc --keepParent "cross_platform/target/release/bundle/macos/Exam Guard Client.app" "release-assets/Exam-Guard-Client-macOS-${{ runner.arch }}.zip"
 
