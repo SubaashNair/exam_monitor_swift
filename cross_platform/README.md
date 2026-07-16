@@ -62,6 +62,25 @@ The client finds the server in three ways, in order:
 
 The teacher's IP for manual entry is shown by `ipconfig` (Windows) or System Settings → Network (macOS).
 
+## Session Evidence Logging
+
+When a room starts, the server writes a per-session folder under its app log
+directory (macOS: `~/Library/Logs/`; Windows: `%LOCALAPPDATA%\...\logs`; the
+exact path is shown at the bottom of the dashboard). The folder contains:
+
+- `events.csv` — an audit trail of every connect / disconnect / reconnect with
+  UTC timestamps, name, and student ID.
+- Periodic JPEG snapshots of each connected student's screen, saved every 60
+  seconds as `<student-id>_<epoch>.jpg`.
+
+Disk use scales with class size and duration: roughly `students × 60` images
+per hour (e.g. 30 students for 2 hours ≈ 3,600 small JPEGs). Delete old session
+folders when you no longer need the evidence.
+
+Disconnected students are **not** removed from the dashboard — their tile turns
+grey ("disconnected Xm ago") so a drop-out stays visible; dismiss it with the ×
+on the tile.
+
 ## macOS: "app is damaged and can't be opened"
 
 The apps are not notarized with Apple (that requires a paid developer

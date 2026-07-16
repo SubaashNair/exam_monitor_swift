@@ -4,7 +4,7 @@
 
 use exam_monitor_core::{ServerRuntime, ServerSnapshot};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 #[derive(Default)]
 struct ServerState {
@@ -13,6 +13,7 @@ struct ServerState {
 
 #[tauri::command(rename_all = "camelCase")]
 fn start_server(
+    app: AppHandle,
     state: State<'_, ServerState>,
     exam_name: String,
     course_name: String,
@@ -28,12 +29,31 @@ fn start_server(
         existing.stop();
     }
 
+    // Evidence log goes under the app's per-user log dir; if it can't be
+    // resolved we run without logging rather than failing to start.
+    let log_base_dir = app.path().app_log_dir().ok();
+
     *runtime = Some(ServerRuntime::start(
         exam_name,
         course_name,
         room_number,
         port,
+        log_base_dir,
     ));
+    Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn dismiss_student(state: State<'_, ServerState>, student_id: u64) -> Result<(), String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| String::from("server state is unavailable"))?;
+
+    if let Some(runtime) = runtime.as_ref() {
+        runtime.dismiss_student(student_id);
+    }
+
     Ok(())
 }
 
@@ -67,6 +87,7 @@ fn server_status(state: State<'_, ServerState>) -> Result<ServerSnapshot, String
             course_name: String::new(),
             room_number: String::new(),
             students: Vec::new(),
+            log_dir: None,
         }))
 }
 
@@ -94,6 +115,7 @@ fn main() {
             start_server,
             stop_server,
             server_status,
+            dismiss_student,
             app_version
         ])
         .run(tauri::generate_context!())

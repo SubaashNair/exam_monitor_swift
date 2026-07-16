@@ -176,6 +176,7 @@ button:disabled {
 }
 
 .student-tile {
+  position: relative;
   height: auto;
   display: grid;
   gap: 8px;
@@ -185,6 +186,63 @@ button:disabled {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
+  cursor: pointer;
+}
+
+.student-tile.stale {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 1px #f59e0b;
+}
+
+.student-tile.stale .student-footer small:last-child {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.student-tile.offline {
+  border-color: #ef4444;
+  background: #f8fafc;
+  opacity: 0.72;
+}
+
+.student-tile.offline .preview {
+  filter: grayscale(1);
+}
+
+.student-tile.offline .student-footer small:last-child {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.dismiss {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  line-height: 1;
+  border-radius: 12px;
+  background: #ef4444;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.search {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1f2933;
+}
+
+.log-dir {
+  margin: 0;
+  padding: 4px 16px 12px;
+  font-size: 12px;
+  color: #94a3b8;
+  overflow-wrap: anywhere;
 }
 
 .preview {
@@ -242,29 +300,16 @@ dialog::backdrop {
 dialog article {
   height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr;
 }
 
-.dialog-header,
-.dialog-actions {
+.dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 16px;
   border-bottom: 1px solid #e2e8f0;
-}
-
-.dialog-actions {
-  justify-content: center;
-  border-top: 1px solid #e2e8f0;
-  border-bottom: 0;
-}
-
-.dialog-actions button {
-  padding: 0 14px;
-  background: #e2e8f0;
-  color: #1f2933;
 }
 
 .dialog-image-wrap {

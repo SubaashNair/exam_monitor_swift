@@ -316,6 +316,7 @@ mod tests {
             String::from("Course"),
             port.to_string(),
             port,
+            None,
         );
 
         let found = searcher.join().unwrap();

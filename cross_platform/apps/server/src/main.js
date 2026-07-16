@@ -16,6 +16,8 @@ const title = document.querySelector("#dashboard-title");
 const subtitle = document.querySelector("#dashboard-subtitle");
 const emptyState = document.querySelector("#empty-state");
 const grid = document.querySelector("#student-grid");
+const searchInput = document.querySelector("#student-search");
+const logDir = document.querySelector("#log-dir");
 const removeColumn = document.querySelector("#remove-column");
 const addColumn = document.querySelector("#add-column");
 const columnLabel = document.querySelector("#column-label");
@@ -55,81 +57,206 @@ function updateColumns(next) {
   addColumn.disabled = columns >= 6;
 }
 
+const STALE_SECONDS = 15;
+const tileEls = new Map();
+let openStudentId = null;
+let searchTerm = "";
+
+function studentState(student) {
+  if (!student.connected) return "offline";
+  const sinceFrame = (Date.now() - Number(student.last_update_ms)) / 1000;
+  return sinceFrame > STALE_SECONDS ? "stale" : "ok";
+}
+
+function statusLabel(student, state) {
+  if (state === "offline") {
+    const since = Number(student.disconnected_at_ms ?? student.last_update_ms);
+    return `disconnected ${formatDuration(since)} ago`;
+  }
+  if (state === "stale") {
+    const seconds = Math.floor((Date.now() - Number(student.last_update_ms)) / 1000);
+    return `⚠ no signal ${seconds}s`;
+  }
+  return `connected ${formatDuration(Number(student.connected_at_ms))}`;
+}
+
+// Problems first (offline, then stale), then alphabetical, so the proctor's
+// attention lands on the tiles that need it.
+function visibleStudents() {
+  const term = searchTerm.trim().toLowerCase();
+  const rank = { offline: 0, stale: 1, ok: 2 };
+  return latestStudents
+    .filter((student) => {
+      if (!term) return true;
+      return (
+        student.name.toLowerCase().includes(term) ||
+        student.student_id.toLowerCase().includes(term)
+      );
+    })
+    .map((student) => ({ student, state: studentState(student) }))
+    .sort((a, b) => {
+      const byRank = rank[a.state] - rank[b.state];
+      return byRank !== 0 ? byRank : a.student.name.localeCompare(b.student.name);
+    });
+}
+
 async function pollStatus() {
-  const status = await invoke("server_status");
+  let status;
+  try {
+    status = await invoke("server_status");
+  } catch (error) {
+    console.error("server_status failed", error);
+    return;
+  }
+
   title.textContent = status.exam_name || "Exam Monitoring";
+  latestStudents = status.students;
+
+  const connected = latestStudents.filter((s) => s.connected).length;
+  const noSignal = latestStudents.filter(
+    (s) => s.connected && (Date.now() - Number(s.last_update_ms)) / 1000 > STALE_SECONDS
+  ).length;
+  const offline = latestStudents.length - connected;
 
   const parts = [];
   if (status.course_name) parts.push(status.course_name);
   if (status.room_number) parts.push(`Class ${status.room_number}`);
-  parts.push(`${status.students.length} connected`);
-  subtitle.textContent = parts.join(" - ");
+  parts.push(`${connected} connected`);
+  if (noSignal > 0) parts.push(`${noSignal} no-signal`);
+  if (offline > 0) parts.push(`${offline} disconnected`);
+  subtitle.textContent = parts.join(" · ");
 
-  latestStudents = status.students;
+  logDir.textContent = status.log_dir ? `Saving evidence to: ${status.log_dir}` : "";
+
   renderStudents();
+  refreshDialog();
 }
 
+// Keyed reconciliation: reuse existing tiles and only touch what changed, so
+// images don't flicker or re-decode every second and tiles keep their place.
 function renderStudents() {
-  emptyState.classList.toggle("hidden", latestStudents.length > 0);
-  grid.classList.toggle("hidden", latestStudents.length === 0);
+  const rows = visibleStudents();
+  emptyState.classList.toggle("hidden", rows.length > 0);
+  grid.classList.toggle("hidden", rows.length === 0);
 
-  grid.innerHTML = "";
-  for (const student of latestStudents) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "student-tile";
-    item.addEventListener("click", () => openStudent(student));
-
-    const preview = document.createElement("div");
-    preview.className = "preview";
-
-    if (student.image_data_url) {
-      const image = document.createElement("img");
-      image.src = student.image_data_url;
-      image.alt = "";
-      preview.append(image);
-    } else {
-      preview.textContent = "Display";
+  const seen = new Set();
+  rows.forEach(({ student, state }, index) => {
+    seen.add(student.id);
+    let entry = tileEls.get(student.id);
+    if (!entry) {
+      entry = createTile(student.id);
+      tileEls.set(student.id, entry);
     }
+    updateTile(entry, student, state);
+    if (grid.children[index] !== entry.tile) {
+      grid.insertBefore(entry.tile, grid.children[index] || null);
+    }
+  });
 
-    const footer = document.createElement("div");
-    footer.className = "student-footer";
-    footer.innerHTML = `
-      <span>
-        <strong>${escapeHtml(student.name)}</strong>
-        ${student.student_id ? `<small>${escapeHtml(student.student_id)}</small>` : ""}
-      </span>
-      <small>${statusLabel(student)}</small>
-    `;
-
-    item.append(preview, footer);
-    grid.append(item);
+  for (const [id, entry] of tileEls) {
+    if (!seen.has(id)) {
+      entry.tile.remove();
+      tileEls.delete(id);
+    }
   }
 }
 
-function openStudent(student) {
+function createTile(id) {
+  const tile = document.createElement("div");
+  tile.className = "student-tile";
+  tile.tabIndex = 0;
+  tile.addEventListener("click", () => openStudent(id));
+
+  const preview = document.createElement("div");
+  preview.className = "preview";
+  const img = document.createElement("img");
+  img.alt = "";
+  img.hidden = true;
+  const placeholder = document.createElement("span");
+  placeholder.className = "preview-placeholder";
+  placeholder.textContent = "Display";
+  preview.append(img, placeholder);
+
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "dismiss";
+  dismiss.textContent = "×";
+  dismiss.title = "Dismiss";
+  dismiss.hidden = true;
+  dismiss.addEventListener("click", (event) => {
+    event.stopPropagation();
+    invoke("dismiss_student", { studentId: id }).catch(() => {});
+  });
+
+  const footer = document.createElement("div");
+  footer.className = "student-footer";
+  const nameWrap = document.createElement("span");
+  const name = document.createElement("strong");
+  const sid = document.createElement("small");
+  nameWrap.append(name, sid);
+  const statusEl = document.createElement("small");
+  footer.append(nameWrap, statusEl);
+
+  tile.append(preview, dismiss, footer);
+  return { tile, img, placeholder, dismiss, name, sid, statusEl, src: null };
+}
+
+function updateTile(entry, student, state) {
+  entry.tile.classList.toggle("stale", state === "stale");
+  entry.tile.classList.toggle("offline", state === "offline");
+
+  const src = student.image_data_url || null;
+  if (src !== entry.src) {
+    entry.src = src;
+    if (src) {
+      entry.img.src = src;
+      entry.img.hidden = false;
+      entry.placeholder.hidden = true;
+    } else {
+      entry.img.removeAttribute("src");
+      entry.img.hidden = true;
+      entry.placeholder.hidden = false;
+    }
+  }
+
+  entry.name.textContent = student.name;
+  entry.sid.textContent = student.student_id;
+  entry.sid.hidden = !student.student_id;
+  entry.statusEl.textContent = statusLabel(student, state);
+  entry.dismiss.hidden = state !== "offline";
+}
+
+function openStudent(id) {
+  openStudentId = id;
+  refreshDialog();
+  if (!dialog.open) dialog.showModal();
+}
+
+// Keep the open zoom view live instead of frozen at click time.
+function refreshDialog() {
+  if (openStudentId === null) return;
+  const student = latestStudents.find((s) => s.id === openStudentId);
+  if (!student) {
+    dialog.close();
+    return;
+  }
+
   dialogName.textContent = student.name;
   dialogId.textContent = student.student_id;
-  dialogImageWrap.innerHTML = "";
 
-  if (student.image_data_url) {
-    const image = document.createElement("img");
-    image.src = student.image_data_url;
-    image.alt = "";
-    dialogImageWrap.append(image);
+  const src = student.image_data_url || null;
+  if (src) {
+    let img = dialogImageWrap.querySelector("img");
+    if (!img) {
+      dialogImageWrap.textContent = "";
+      img = document.createElement("img");
+      img.alt = "";
+      dialogImageWrap.append(img);
+    }
+    if (img.getAttribute("src") !== src) img.src = src;
   } else {
     dialogImageWrap.textContent = "Display";
   }
-
-  dialog.showModal();
-}
-
-function statusLabel(student) {
-  const sinceFrame = Math.floor((Date.now() - Number(student.last_update_ms)) / 1000);
-  if (sinceFrame > 15) {
-    return `⚠ no signal ${sinceFrame}s`;
-  }
-  return `connected ${formatDuration(Number(student.connected_at_ms))}`;
 }
 
 function formatDuration(startMs) {
@@ -139,15 +266,6 @@ function formatDuration(startMs) {
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
   return `${seconds}s`;
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }
 
 function startPolling() {
@@ -232,12 +350,23 @@ stopButton.addEventListener("click", async () => {
   await invoke("stop_server");
   stopPolling();
   latestStudents = [];
+  for (const entry of tileEls.values()) entry.tile.remove();
+  tileEls.clear();
+  if (dialog.open) dialog.close();
   setScreen("home");
+});
+
+searchInput.addEventListener("input", () => {
+  searchTerm = searchInput.value;
+  renderStudents();
 });
 
 removeColumn.addEventListener("click", () => updateColumns(columns - 1));
 addColumn.addEventListener("click", () => updateColumns(columns + 1));
 closeDialog.addEventListener("click", () => dialog.close());
+dialog.addEventListener("close", () => {
+  openStudentId = null;
+});
 
 updateColumns(columns);
 updateFormState();

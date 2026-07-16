@@ -46,6 +46,7 @@
         </section>
 
         <div class="toolbar-actions">
+          <input id="student-search" class="search" type="search" placeholder="Search name or ID" />
           <button id="remove-column" class="icon-button" type="button">-</button>
           <span id="column-label">1 column</span>
           <button id="add-column" class="icon-button" type="button">+</button>
@@ -55,6 +56,7 @@
 
       <section id="empty-state" class="empty">Waiting for students to connect...</section>
       <section id="student-grid" class="student-grid"></section>
+      <p id="log-dir" class="log-dir"></p>
     </main>
 
     <dialog id="student-dialog">
@@ -67,11 +69,6 @@
           <button id="close-dialog" class="icon-button" type="button">x</button>
         </header>
         <div id="dialog-image-wrap" class="dialog-image-wrap"></div>
-        <footer class="dialog-actions">
-          <button type="button">Send Message</button>
-          <button type="button">Flag Student</button>
-          <button type="button">Disconnect</button>
-        </footer>
       </article>
     </dialog>
 
