@@ -23,6 +23,8 @@ struct Student: Identifiable {
     var image: NSImage?
     var connection: NWConnection
     var lastUpdate: Date
+    /// True once a valid identity (with the correct join code) has arrived.
+    var isVerified: Bool
 
     init(connection: NWConnection) {
         self.id = UUID()
@@ -31,7 +33,15 @@ struct Student: Identifiable {
         self.image = nil
         self.connection = connection
         self.lastUpdate = Date()
+        self.isVerified = false
     }
+}
+
+/// Generate a 4-character room join code from an unambiguous alphabet
+/// (no 0/O/1/I), matching the cross-platform apps.
+func generateJoinCode() -> String {
+    let alphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+    return String((0..<4).map { _ in alphabet.randomElement()! })
 }
 
 class Server: NSObject, ObservableObject {
@@ -51,11 +61,13 @@ class Server: NSObject, ObservableObject {
     @Published var examName: String = ""
     @Published var courseName: String = ""
     @Published var roomNumber: String = ""
+    @Published var joinCode: String = ""
 
     func start(port: Int) {
         guard !isRunning else { return }
 
         self.port = port
+        joinCode = generateJoinCode()
         setupTCPListener(port: port)
         discoveryResponder = UDPDiscoveryResponder(port: UInt16(port))
         discoveryResponder?.start()
@@ -101,9 +113,10 @@ class Server: NSObject, ObservableObject {
         DispatchQueue.main.async {
             self.students.removeAll()
             self.isRunning = false
+            self.joinCode = ""
         }
     }
-    
+
     // MARK: - Private Methods
     
     private func setupTCPListener(port: Int) {
@@ -288,17 +301,33 @@ class Server: NSObject, ObservableObject {
         switch type {
         case .name:
             if let payload = String(data: data, encoding: .utf8) {
-                let parts = payload.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
-                let name = String(parts[0])
-                let studentID = parts.count > 1 ? String(parts[1]) : ""
-                print("SERVER: Received identity name=\(name) id=\(studentID)")
-                DispatchQueue.main.async {
-                    self.students[index].name = name
-                    self.students[index].studentID = studentID
+                // Payload is joinCode|name|studentID (matches cross-platform apps).
+                let parts = payload.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
+                let code = parts.count > 0 ? String(parts[0]) : ""
+                let name = parts.count > 1 ? String(parts[1]) : "Unknown"
+                let studentID = parts.count > 2 ? String(parts[2]) : ""
+
+                if !joinCode.isEmpty && code != joinCode {
+                    print("SERVER: rejecting connection: wrong join code")
+                    student.connection.cancel()
+                    self.removeStudent(with: student.connection)
+                    return
                 }
+
+                print("SERVER: Received identity name=\(name) id=\(studentID)")
+                self.students[index].name = name
+                self.students[index].studentID = studentID
+                self.students[index].isVerified = true
             }
-            
+
         case .picture:
+            // A framed room requires the join code first; drop unverified frames.
+            if !joinCode.isEmpty && !students[index].isVerified {
+                print("SERVER: rejecting frame before join code")
+                student.connection.cancel()
+                self.removeStudent(with: student.connection)
+                return
+            }
             print("SERVER: Processing image data: \(data.count) bytes")
             if let nsImage = NSImage(data: data) {
                 print("SERVER: Successfully created NSImage: \(nsImage.size.width) x \(nsImage.size.height)")

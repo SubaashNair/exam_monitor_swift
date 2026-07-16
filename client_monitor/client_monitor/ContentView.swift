@@ -50,6 +50,13 @@ struct JoinView: View {
                         let filtered = String(newValue.filter { $0.isNumber }.prefix(4))
                         if filtered != newValue { appState.roomNumber = filtered }
                     }
+
+                FieldRow(label: "Join Code", placeholder: "4-letter code on teacher's screen", text: $appState.joinCode)
+                    .onChange(of: appState.joinCode) { _, newValue in
+                        let allowed = Set("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+                        let filtered = String(newValue.uppercased().filter { allowed.contains($0) }.prefix(4))
+                        if filtered != newValue { appState.joinCode = filtered }
+                    }
             }
             .frame(maxWidth: 360)
 

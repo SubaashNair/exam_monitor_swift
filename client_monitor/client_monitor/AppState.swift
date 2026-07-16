@@ -18,6 +18,7 @@ class AppState: ObservableObject {
     @Published var studentName: String = ""
     @Published var studentID: String = ""
     @Published var roomNumber: String = ""
+    @Published var joinCode: String = ""
 
     let client = Client()
 
@@ -25,6 +26,7 @@ class AppState: ObservableObject {
         !studentName.trimmingCharacters(in: .whitespaces).isEmpty
             && studentID.trimmingCharacters(in: .whitespaces).count >= 3
             && Int(roomNumber).map { $0 > 0 } == true
+            && joinCode.trimmingCharacters(in: .whitespaces).count == 4
     }
 
     func switchToJoin() {
@@ -45,6 +47,7 @@ class AppState: ObservableObject {
         client.start(
             studentName: studentName.trimmingCharacters(in: .whitespaces),
             studentID: studentID.trimmingCharacters(in: .whitespaces),
+            joinCode: joinCode.trimmingCharacters(in: .whitespaces).uppercased(),
             port: roomNum
         ) { [weak self] in
             DispatchQueue.main.async {

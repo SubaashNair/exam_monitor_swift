@@ -34,11 +34,13 @@ class Client: NSObject {
     
     private var studentName: String = ""
     private var studentID: String = ""
+    private var joinCode: String = ""
 
-    func start(studentName: String, studentID: String, port: Int, updateUI: @escaping () -> Void) {
+    func start(studentName: String, studentID: String, joinCode: String, port: Int, updateUI: @escaping () -> Void) {
         self.updateUI = updateUI
         self.studentName = studentName
         self.studentID = studentID
+        self.joinCode = joinCode
         _isRunning = true
 
         // Initialize screen capture
@@ -289,9 +291,10 @@ class Client: NSObject {
     }
     
     private func sendIdentity(name: String, studentID: String) {
-        // Payload format: "name|studentID". Server splits on '|';
-        // legacy single-segment payloads still parse correctly (id stays empty).
-        let payload = "\(name)|\(studentID)"
+        // Payload format: "joinCode|name|studentID" (matches cross-platform apps).
+        // '|' is the field separator, so strip it from each field.
+        let clean = { (value: String) in value.replacingOccurrences(of: "|", with: " ") }
+        let payload = "\(clean(joinCode))|\(clean(name))|\(clean(studentID))"
         guard let data = payload.data(using: .utf8) else { return }
         sendData(type: .name, data: data)
     }

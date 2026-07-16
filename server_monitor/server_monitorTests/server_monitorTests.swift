@@ -62,4 +62,14 @@ struct server_monitorTests {
         #expect(Set(targets).count == targets.count)
     }
 
+    @Test("Join code is 4 chars from the unambiguous alphabet")
+    func joinCodeFormat() {
+        let allowed = Set("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+        for _ in 0..<50 {
+            let code = generateJoinCode()
+            #expect(code.count == 4)
+            #expect(code.allSatisfy { allowed.contains($0) })
+        }
+    }
+
 }

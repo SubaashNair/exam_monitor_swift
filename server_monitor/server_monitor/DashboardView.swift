@@ -477,6 +477,22 @@ struct DashboardView: View {
                     .foregroundColor(.secondary)
                 }
 
+                if !server.joinCode.isEmpty {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Join code")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text(server.joinCode)
+                            .font(.system(.title3, design: .monospaced))
+                            .fontWeight(.semibold)
+                            .tracking(2)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.blue.opacity(0.12))
+                    .cornerRadius(6)
+                }
+
                 Spacer()
 
                 // Column adjustment controls
