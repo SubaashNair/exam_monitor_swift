@@ -95,9 +95,18 @@ pub fn read_packet<R: Read>(reader: &mut R) -> io::Result<Packet> {
 }
 
 /// Identity payload is `joinCode|name|studentID`. The join code lets the
-/// server reject connections that don't know the room's code.
+/// server reject connections that don't know the room's code. `|` is the field
+/// separator, so it is stripped from each field to keep parsing unambiguous
+/// (e.g. a student named "Smith | Jr").
 pub fn identity_payload(join_code: &str, student_name: &str, student_id: &str) -> Vec<u8> {
-    format!("{join_code}|{student_name}|{student_id}").into_bytes()
+    let clean = |value: &str| value.replace('|', " ");
+    format!(
+        "{}|{}|{}",
+        clean(join_code),
+        clean(student_name),
+        clean(student_id)
+    )
+    .into_bytes()
 }
 
 pub fn parse_identity(payload: &[u8]) -> (String, String, String) {
@@ -142,6 +151,16 @@ mod tests {
                 String::from("STU-001"),
             )
         );
+    }
+
+    #[test]
+    fn identity_strips_pipes_so_names_cannot_shift_fields() {
+        // A name containing the field separator must not corrupt the parse.
+        let payload = identity_payload("7GK4", "Smith | Jr", "STU-2");
+        let (code, name, id) = parse_identity(&payload);
+        assert_eq!(code, "7GK4");
+        assert_eq!(name, "Smith   Jr");
+        assert_eq!(id, "STU-2");
     }
 
     #[test]

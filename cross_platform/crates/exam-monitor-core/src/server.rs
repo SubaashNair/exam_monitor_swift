@@ -150,15 +150,29 @@ impl ServerRuntime {
 
     /// Delete this session's evidence folder if the teacher opted in. Safe to
     /// call more than once (missing dir is ignored).
+    ///
+    /// Retries briefly: a just-disconnected student's handler thread may still
+    /// be flushing its final `events.csv` write, and on Windows an open file
+    /// handle blocks directory deletion until that thread finishes.
+    /// ponytail: bounded retry, not full handler-thread join-tracking.
     pub fn clear_evidence(&self) {
         if !self.clear_on_finish.load(Ordering::SeqCst) {
             return;
         }
-        if let Some(dir) = &self.session_dir {
+        let Some(dir) = &self.session_dir else { return };
+
+        for attempt in 0..10 {
             match std::fs::remove_dir_all(dir) {
-                Ok(()) => eprintln!("SERVER: cleared evidence folder {}", dir.display()),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => eprintln!("SERVER: failed to clear evidence: {error}"),
+                Ok(()) => {
+                    eprintln!("SERVER: cleared evidence folder {}", dir.display());
+                    return;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                Err(error) if attempt == 9 => {
+                    eprintln!("SERVER: failed to clear evidence: {error}");
+                    return;
+                }
+                Err(_) => thread::sleep(Duration::from_millis(100)),
             }
         }
     }

@@ -28,7 +28,8 @@ Packets intentionally match the Swift prototype:
 
 Packet types:
 
-- `0`: name payload as `name|studentID`
+- `0`: identity payload as `joinCode|name|studentID` (since v0.1.10; was
+  `name|studentID` before — old 2-field clients are rejected by a v0.1.10 server)
 - `1`: message payload, reserved for later
 - `2`: JPEG screen frame
 
@@ -167,11 +168,13 @@ Before sharing with real users, add platform signing/notarization:
 
 ## Stress Test
 
-Start the server app and create a room first. Then run synthetic clients against that room number:
+Start the server app and create a room first. Then run synthetic clients against
+that room number, passing the room's join code with `--code` (v0.1.10+ servers
+reject connections without the correct code):
 
 ```bash
 cd cross_platform
-cargo run -p stress-clients -- --host 127.0.0.1 --port 1234 --clients 20 --fps 5 --seconds 60
+cargo run -p stress-clients -- --host 127.0.0.1 --port 1234 --clients 20 --fps 5 --seconds 60 --code ABCD
 ```
 
 The tool sends the same protocol as the real client: one identity packet followed by JPEG frame packets.
