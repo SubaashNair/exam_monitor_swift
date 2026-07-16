@@ -46,6 +46,9 @@
         </section>
 
         <div class="toolbar-actions">
+          <span id="join-code-chip" class="join-code-chip" hidden>
+            Join code <strong id="join-code">----</strong>
+          </span>
           <input id="student-search" class="search" type="search" placeholder="Search name or ID" />
           <button id="remove-column" class="icon-button" type="button">-</button>
           <span id="column-label">1 column</span>
@@ -56,7 +59,13 @@
 
       <section id="empty-state" class="empty">Waiting for students to connect...</section>
       <section id="student-grid" class="student-grid"></section>
-      <p id="log-dir" class="log-dir"></p>
+      <footer class="session-bar">
+        <label class="clear-toggle">
+          <input id="clear-evidence" type="checkbox" />
+          <span>Delete this session's screenshots when I finish</span>
+        </label>
+        <p id="log-dir" class="log-dir"></p>
+      </footer>
     </main>
 
     <dialog id="student-dialog">

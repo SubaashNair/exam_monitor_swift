@@ -47,6 +47,8 @@ pub struct ServerSnapshot {
     pub students: Vec<StudentSnapshot>,
     /// Folder where this session's evidence log is written, if logging is on.
     pub log_dir: Option<String>,
+    /// The room's join code, shown to the teacher to read out to students.
+    pub join_code: String,
 }
 
 pub struct ServerRuntime {
@@ -56,7 +58,10 @@ pub struct ServerRuntime {
     exam_name: String,
     course_name: String,
     room_number: String,
+    join_code: String,
     log_dir: Option<String>,
+    session_dir: Option<PathBuf>,
+    clear_on_finish: Arc<AtomicBool>,
     workers: Vec<JoinHandle<()>>,
 }
 
@@ -67,6 +72,7 @@ impl ServerRuntime {
         room_number: String,
         port: u16,
         log_base_dir: Option<PathBuf>,
+        join_code: String,
     ) -> Self {
         let running = Arc::new(AtomicBool::new(true));
         let students = Arc::new(Mutex::new(Vec::new()));
@@ -82,17 +88,21 @@ impl ServerRuntime {
                 }
             }
         });
-        let log_dir = logger
+        let session_dir = logger.as_ref().map(|logger| logger.dir().to_path_buf());
+        let log_dir = session_dir
             .as_ref()
-            .map(|logger| logger.dir().display().to_string());
+            .map(|dir| dir.display().to_string());
 
         let accept_worker = {
             let running = Arc::clone(&running);
             let students = Arc::clone(&students);
             let connections = Arc::clone(&connections);
             let logger = logger.clone();
+            let join_code = join_code.clone();
 
-            thread::spawn(move || run_tcp_listener(port, running, students, connections, logger))
+            thread::spawn(move || {
+                run_tcp_listener(port, running, students, connections, logger, join_code)
+            })
         };
 
         let broadcast_worker = {
@@ -117,7 +127,10 @@ impl ServerRuntime {
             exam_name,
             course_name,
             room_number,
+            join_code,
             log_dir,
+            session_dir,
+            clear_on_finish: Arc::new(AtomicBool::new(false)),
             workers,
         }
     }
@@ -126,6 +139,27 @@ impl ServerRuntime {
     pub fn dismiss_student(&self, id: u64) {
         if let Ok(mut students) = self.students.lock() {
             students.retain(|student| student.id != id);
+        }
+    }
+
+    /// Opt in/out of deleting this session's evidence folder when the room
+    /// finishes (Stop pressed or app quit). Off by default.
+    pub fn set_clear_evidence(&self, enabled: bool) {
+        self.clear_on_finish.store(enabled, Ordering::SeqCst);
+    }
+
+    /// Delete this session's evidence folder if the teacher opted in. Safe to
+    /// call more than once (missing dir is ignored).
+    pub fn clear_evidence(&self) {
+        if !self.clear_on_finish.load(Ordering::SeqCst) {
+            return;
+        }
+        if let Some(dir) = &self.session_dir {
+            match std::fs::remove_dir_all(dir) {
+                Ok(()) => eprintln!("SERVER: cleared evidence folder {}", dir.display()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => eprintln!("SERVER: failed to clear evidence: {error}"),
+            }
         }
     }
 
@@ -147,6 +181,9 @@ impl ServerRuntime {
         if let Ok(mut students) = self.students.lock() {
             students.clear();
         }
+
+        // Honour the teacher's opt-in to wipe evidence when the room finishes.
+        self.clear_evidence();
     }
 
     pub fn snapshot(&self) -> ServerSnapshot {
@@ -161,8 +198,30 @@ impl ServerRuntime {
                 .map(|students| students.clone())
                 .unwrap_or_default(),
             log_dir: self.log_dir.clone(),
+            join_code: self.join_code.clone(),
         }
     }
+}
+
+/// Generate a 4-character room join code from an unambiguous alphabet
+/// (no 0/O/1/I). Time-seeded — unpredictable enough to stop a bystander who
+/// only overheard the room number from joining, which is all it needs to do.
+pub fn generate_join_code() -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let mut seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(1) as u64
+        | 1;
+    let mut code = String::with_capacity(4);
+    for _ in 0..4 {
+        // xorshift64 step for a cheap, dependency-free spread.
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        code.push(ALPHABET[(seed % ALPHABET.len() as u64) as usize] as char);
+    }
+    code
 }
 
 impl Drop for ServerRuntime {
@@ -177,7 +236,9 @@ fn run_tcp_listener(
     students: Arc<Mutex<Vec<StudentSnapshot>>>,
     connections: Connections,
     logger: Option<Arc<SessionLogger>>,
+    join_code: String,
 ) {
+    let join_code = Arc::new(join_code);
     let listener = match TcpListener::bind(("0.0.0.0", port)) {
         Ok(listener) => listener,
         Err(error) => {
@@ -221,8 +282,9 @@ fn run_tcp_listener(
                 let students = Arc::clone(&students);
                 let connections = Arc::clone(&connections);
                 let logger = logger.clone();
+                let join_code = Arc::clone(&join_code);
                 thread::spawn(move || {
-                    handle_student(id, stream, running, students, connections, logger)
+                    handle_student(id, stream, running, students, connections, logger, join_code)
                 });
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -313,7 +375,12 @@ fn handle_student(
     students: Arc<Mutex<Vec<StudentSnapshot>>>,
     connections: Connections,
     logger: Option<Arc<SessionLogger>>,
+    join_code: Arc<String>,
 ) {
+    // When a room has a join code, a connection must present it before it can
+    // register — this is what stops a bystander who only knows the room number
+    // from appearing as a (possibly spoofed) student.
+    let require_code = !join_code.is_empty();
     let mut is_registered = false;
     let mut received_frames = 0_u64;
     let mut identity = (String::from("Unknown"), String::new());
@@ -333,7 +400,11 @@ fn handle_student(
 
         match packet.packet_type {
             PacketType::Name => {
-                let (name, student_id) = parse_identity(&packet.payload);
+                let (code, name, student_id) = parse_identity(&packet.payload);
+                if require_code && code != *join_code {
+                    eprintln!("SERVER: rejecting connection {id}: wrong join code");
+                    break;
+                }
                 // A reconnecting student replaces their own tombstone rather
                 // than showing twice.
                 if !student_id.is_empty() {
@@ -355,6 +426,12 @@ fn handle_student(
             }
             PacketType::Picture => {
                 if !is_registered {
+                    // A framed room requires the join code first; an unverified
+                    // frame-before-identity connection is dropped.
+                    if require_code {
+                        eprintln!("SERVER: rejecting connection {id}: frame before join code");
+                        break;
+                    }
                     upsert_student(&students, id, |student| {
                         student.last_update_ms = now_ms();
                     });
@@ -522,6 +599,7 @@ mod tests {
             port.to_string(),
             port,
             None,
+            String::new(),
         );
 
         thread::sleep(Duration::from_millis(200));
@@ -530,7 +608,7 @@ mod tests {
         write_packet(
             &mut stream,
             PacketType::Name,
-            &identity_payload("Probe Student", "PROBE-2"),
+            &identity_payload("", "Probe Student", "PROBE-2"),
         )
         .unwrap();
         thread::sleep(Duration::from_millis(200));
@@ -557,6 +635,7 @@ mod tests {
             port.to_string(),
             port,
             None,
+            String::new(),
         );
 
         thread::sleep(Duration::from_millis(200));
@@ -566,7 +645,7 @@ mod tests {
         write_packet(
             &mut stream,
             PacketType::Name,
-            &identity_payload("Ada", "STU-1"),
+            &identity_payload("", "Ada", "STU-1"),
         )
         .unwrap();
         thread::sleep(Duration::from_millis(150));
@@ -595,13 +674,14 @@ mod tests {
             port.to_string(),
             port,
             None,
+            String::new(),
         );
 
         thread::sleep(Duration::from_millis(200));
 
         // First connection registers and drops.
         let mut first = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        write_packet(&mut first, PacketType::Name, &identity_payload("Ada", "STU-9")).unwrap();
+        write_packet(&mut first, PacketType::Name, &identity_payload("", "Ada", "STU-9")).unwrap();
         thread::sleep(Duration::from_millis(150));
         drop(first);
         thread::sleep(Duration::from_millis(300));
@@ -609,7 +689,7 @@ mod tests {
 
         // Same student reconnects — should collapse to one live tile.
         let mut second = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        write_packet(&mut second, PacketType::Name, &identity_payload("Ada", "STU-9")).unwrap();
+        write_packet(&mut second, PacketType::Name, &identity_payload("", "Ada", "STU-9")).unwrap();
         thread::sleep(Duration::from_millis(200));
 
         let snapshot = runtime.snapshot();
@@ -626,6 +706,7 @@ mod tests {
             port.to_string(),
             port,
             None,
+            String::new(),
         );
 
         thread::sleep(Duration::from_millis(200));
@@ -655,6 +736,7 @@ mod tests {
             port.to_string(),
             port,
             None,
+            String::new(),
         );
 
         thread::sleep(Duration::from_millis(200));
@@ -663,7 +745,7 @@ mod tests {
         write_packet(
             &mut stream,
             PacketType::Name,
-            &identity_payload("Probe Student", "PROBE-1"),
+            &identity_payload("", "Probe Student", "PROBE-1"),
         )
         .unwrap();
 
@@ -678,5 +760,73 @@ mod tests {
         assert_eq!(snapshot.students.len(), 1);
         assert_eq!(snapshot.students[0].name, "Probe Student");
         assert!(snapshot.students[0].image_data_url.is_some());
+    }
+
+    #[test]
+    fn wrong_join_code_is_rejected_but_correct_one_registers() {
+        let port = 42_362;
+        let runtime = ServerRuntime::start(
+            String::from("Exam"),
+            String::from("Course"),
+            port.to_string(),
+            port,
+            None,
+            String::from("7GK4"),
+        );
+
+        thread::sleep(Duration::from_millis(200));
+
+        // Wrong code: connection is dropped, never registered.
+        let mut bad = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write_packet(&mut bad, PacketType::Name, &identity_payload("XXXX", "Mallory", "M-1")).unwrap();
+        thread::sleep(Duration::from_millis(200));
+        assert!(
+            runtime.snapshot().students.is_empty(),
+            "wrong code must not register"
+        );
+
+        // Correct code: registers normally.
+        let mut good = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write_packet(&mut good, PacketType::Name, &identity_payload("7GK4", "Ada", "STU-1")).unwrap();
+        thread::sleep(Duration::from_millis(200));
+        let students = runtime.snapshot().students;
+        assert_eq!(students.len(), 1);
+        assert_eq!(students[0].name, "Ada");
+    }
+
+    #[test]
+    fn clear_evidence_removes_session_folder_only_when_opted_in() {
+        let base = std::env::temp_dir().join(format!("examguard_test_{}", now_ms()));
+        std::fs::create_dir_all(&base).unwrap();
+
+        // Off by default: folder survives stop().
+        let mut kept = ServerRuntime::start(
+            String::from("Exam"),
+            String::from("Course"),
+            String::from("42363"),
+            42_363,
+            Some(base.clone()),
+            String::new(),
+        );
+        let kept_dir = kept.snapshot().log_dir.map(std::path::PathBuf::from).unwrap();
+        assert!(kept_dir.exists());
+        kept.stop();
+        assert!(kept_dir.exists(), "must keep evidence when not opted in");
+
+        // Opted in: folder deleted on stop().
+        let mut cleared = ServerRuntime::start(
+            String::from("Exam"),
+            String::from("Course"),
+            String::from("42364"),
+            42_364,
+            Some(base.clone()),
+            String::new(),
+        );
+        let cleared_dir = cleared.snapshot().log_dir.map(std::path::PathBuf::from).unwrap();
+        cleared.set_clear_evidence(true);
+        cleared.stop();
+        assert!(!cleared_dir.exists(), "must delete evidence when opted in");
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

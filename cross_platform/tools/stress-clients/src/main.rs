@@ -17,6 +17,7 @@ struct Config {
     width: u32,
     height: u32,
     quality: u8,
+    code: String,
 }
 
 impl Default for Config {
@@ -30,6 +31,7 @@ impl Default for Config {
             width: 720,
             height: 405,
             quality: 60,
+            code: String::new(),
         }
     }
 }
@@ -103,7 +105,7 @@ fn run_client(client_index: usize, addr: SocketAddr, config: Config) -> Result<C
     write_packet(
         &mut stream,
         PacketType::Name,
-        &identity_payload(&student_name, &student_id),
+        &identity_payload(&config.code, &student_name, &student_id),
     )
     .with_context(|| format!("client {client_index:02} failed to send identity"))?;
 
@@ -226,6 +228,7 @@ impl Config {
                 "--quality" => {
                     config.quality = value()?.parse().context("--quality must be a number")?
                 }
+                "--code" => config.code = value()?,
                 "--help" | "-h" => {
                     print_usage();
                     std::process::exit(0);

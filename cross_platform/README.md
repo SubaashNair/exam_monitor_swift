@@ -62,6 +62,18 @@ The client finds the server in three ways, in order:
 
 The teacher's IP for manual entry is shown by `ipconfig` (Windows) or System Settings → Network (macOS).
 
+## Room Join Code
+
+From v0.1.10, every room shows a 4-character **join code** (e.g. `7GK4`) next
+to the class number on the teacher's dashboard. Students must enter both the
+class number and this code to connect — a bystander who only overhears the room
+number can no longer join or impersonate a classmate.
+
+Because the code is part of the connection handshake, **all students must run
+the v0.1.10 (or newer) client** — older clients that don't send a code are
+rejected. Read the code out to the class, or show it on a projector, when the
+exam starts.
+
 ## Session Evidence Logging
 
 When a room starts, the server writes a per-session folder under its app log
@@ -80,6 +92,11 @@ folders when you no longer need the evidence.
 Disconnected students are **not** removed from the dashboard — their tile turns
 grey ("disconnected Xm ago") so a drop-out stays visible; dismiss it with the ×
 on the tile.
+
+To auto-delete a session's screenshots, tick **"Delete this session's
+screenshots when I finish"** in the dashboard footer before you finish. It is
+off by default and clears the current session's folder when you press Stop
+Monitoring or quit the app; older session folders are never touched.
 
 ## macOS: "app is damaged and can't be opened"
 

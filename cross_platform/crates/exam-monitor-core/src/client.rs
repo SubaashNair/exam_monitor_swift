@@ -32,6 +32,7 @@ impl ClientRuntime {
         student_id: String,
         port: u16,
         server_ip: Option<IpAddr>,
+        join_code: String,
     ) -> Self {
         let running = Arc::new(AtomicBool::new(true));
         let connected = Arc::new(AtomicBool::new(false));
@@ -65,7 +66,8 @@ impl ClientRuntime {
                                     eprintln!("CLIENT: connected to {addr}");
                                     set_status(&status, "Connected, sending identity...");
 
-                                    let identity = identity_payload(&student_name, &student_id);
+                                    let identity =
+                                        identity_payload(&join_code, &student_name, &student_id);
                                     if let Err(error) =
                                         write_packet(&mut stream, PacketType::Name, &identity)
                                     {
@@ -317,6 +319,7 @@ mod tests {
             port.to_string(),
             port,
             None,
+            String::new(),
         );
 
         let found = searcher.join().unwrap();

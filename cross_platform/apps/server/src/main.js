@@ -18,6 +18,9 @@ const emptyState = document.querySelector("#empty-state");
 const grid = document.querySelector("#student-grid");
 const searchInput = document.querySelector("#student-search");
 const logDir = document.querySelector("#log-dir");
+const joinCodeChip = document.querySelector("#join-code-chip");
+const joinCodeValue = document.querySelector("#join-code");
+const clearEvidence = document.querySelector("#clear-evidence");
 const removeColumn = document.querySelector("#remove-column");
 const addColumn = document.querySelector("#add-column");
 const columnLabel = document.querySelector("#column-label");
@@ -127,6 +130,13 @@ async function pollStatus() {
   subtitle.textContent = parts.join(" · ");
 
   logDir.textContent = status.log_dir ? `Saving evidence to: ${status.log_dir}` : "";
+
+  if (status.join_code) {
+    joinCodeValue.textContent = status.join_code;
+    joinCodeChip.hidden = false;
+  } else {
+    joinCodeChip.hidden = true;
+  }
 
   renderStudents();
   refreshDialog();
@@ -353,12 +363,19 @@ stopButton.addEventListener("click", async () => {
   for (const entry of tileEls.values()) entry.tile.remove();
   tileEls.clear();
   if (dialog.open) dialog.close();
+  clearEvidence.checked = false;
   setScreen("home");
 });
 
 searchInput.addEventListener("input", () => {
   searchTerm = searchInput.value;
   renderStudents();
+});
+
+clearEvidence.addEventListener("change", () => {
+  invoke("set_clear_evidence", { enabled: clearEvidence.checked }).catch((error) => {
+    console.error("set_clear_evidence failed", error);
+  });
 });
 
 removeColumn.addEventListener("click", () => updateColumns(columns - 1));

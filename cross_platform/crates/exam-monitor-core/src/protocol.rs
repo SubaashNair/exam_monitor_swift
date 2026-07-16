@@ -94,16 +94,19 @@ pub fn read_packet<R: Read>(reader: &mut R) -> io::Result<Packet> {
     })
 }
 
-pub fn identity_payload(student_name: &str, student_id: &str) -> Vec<u8> {
-    format!("{student_name}|{student_id}").into_bytes()
+/// Identity payload is `joinCode|name|studentID`. The join code lets the
+/// server reject connections that don't know the room's code.
+pub fn identity_payload(join_code: &str, student_name: &str, student_id: &str) -> Vec<u8> {
+    format!("{join_code}|{student_name}|{student_id}").into_bytes()
 }
 
-pub fn parse_identity(payload: &[u8]) -> (String, String) {
+pub fn parse_identity(payload: &[u8]) -> (String, String, String) {
     let value = String::from_utf8_lossy(payload);
-    let mut parts = value.splitn(2, '|');
+    let mut parts = value.splitn(3, '|');
+    let join_code = parts.next().unwrap_or("").to_string();
     let name = parts.next().unwrap_or("Unknown").to_string();
     let student_id = parts.next().unwrap_or("").to_string();
-    (name, student_id)
+    (join_code, name, student_id)
 }
 
 #[cfg(test)]
@@ -129,10 +132,24 @@ mod tests {
     }
 
     #[test]
-    fn identity_parser_keeps_legacy_name_only_payloads() {
+    fn identity_round_trip_carries_join_code() {
+        let payload = identity_payload("7GK4", "Ada Lovelace", "STU-001");
         assert_eq!(
-            parse_identity(b"Ada Lovelace"),
-            (String::from("Ada Lovelace"), String::new())
+            parse_identity(&payload),
+            (
+                String::from("7GK4"),
+                String::from("Ada Lovelace"),
+                String::from("STU-001"),
+            )
+        );
+    }
+
+    #[test]
+    fn identity_parser_tolerates_missing_fields() {
+        // A payload with only a code (no name/id) still parses without panic.
+        assert_eq!(
+            parse_identity(b"7GK4"),
+            (String::from("7GK4"), String::from("Unknown"), String::new())
         );
     }
 }

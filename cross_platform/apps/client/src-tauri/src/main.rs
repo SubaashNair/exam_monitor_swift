@@ -19,9 +19,14 @@ fn start_client(
     student_id: String,
     room_number: String,
     server_ip: Option<String>,
+    join_code: String,
 ) -> Result<(), String> {
     let port = parse_room_number(&room_number)?;
     let server_ip = parse_server_ip(server_ip.as_deref())?;
+    let join_code = join_code.trim().to_uppercase();
+    if join_code.is_empty() {
+        return Err(String::from("enter the join code shown on the teacher's screen"));
+    }
     let mut runtime = state
         .runtime
         .lock()
@@ -31,7 +36,13 @@ fn start_client(
         existing.stop();
     }
 
-    *runtime = Some(ClientRuntime::start(student_name, student_id, port, server_ip));
+    *runtime = Some(ClientRuntime::start(
+        student_name,
+        student_id,
+        port,
+        server_ip,
+        join_code,
+    ));
     Ok(())
 }
 

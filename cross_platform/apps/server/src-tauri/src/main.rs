@@ -2,9 +2,9 @@
 // the packaged .exe is built for the console subsystem and pops a terminal.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use exam_monitor_core::{ServerRuntime, ServerSnapshot};
+use exam_monitor_core::{generate_join_code, ServerRuntime, ServerSnapshot};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, RunEvent, State};
 
 #[derive(Default)]
 struct ServerState {
@@ -33,13 +33,32 @@ fn start_server(
     // resolved we run without logging rather than failing to start.
     let log_base_dir = app.path().app_log_dir().ok();
 
+    // Every room gets a join code students must enter, so a bystander who only
+    // knows the room number can't connect.
+    let join_code = generate_join_code();
+
     *runtime = Some(ServerRuntime::start(
         exam_name,
         course_name,
         room_number,
         port,
         log_base_dir,
+        join_code,
     ));
+    Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn set_clear_evidence(state: State<'_, ServerState>, enabled: bool) -> Result<(), String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| String::from("server state is unavailable"))?;
+
+    if let Some(runtime) = runtime.as_ref() {
+        runtime.set_clear_evidence(enabled);
+    }
+
     Ok(())
 }
 
@@ -88,6 +107,7 @@ fn server_status(state: State<'_, ServerState>) -> Result<ServerSnapshot, String
             room_number: String::new(),
             students: Vec::new(),
             log_dir: None,
+            join_code: String::new(),
         }))
 }
 
@@ -116,8 +136,22 @@ fn main() {
             stop_server,
             server_status,
             dismiss_student,
+            set_clear_evidence,
             app_version
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run Exam Guard Server");
+        .build(tauri::generate_context!())
+        .expect("failed to run Exam Guard Server")
+        .run(|app, event| {
+            // On quit, honour the clear-evidence opt-in. Tauri often hard-exits
+            // without running Drop, so we clear here before the process ends.
+            if let RunEvent::ExitRequested { .. } = event {
+                if let Some(state) = app.try_state::<ServerState>() {
+                    if let Ok(runtime) = state.runtime.lock() {
+                        if let Some(runtime) = runtime.as_ref() {
+                            runtime.clear_evidence();
+                        }
+                    }
+                }
+            }
+        });
 }
