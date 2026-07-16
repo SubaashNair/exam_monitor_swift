@@ -26,6 +26,7 @@ pub struct StudentSnapshot {
     pub name: String,
     pub student_id: String,
     pub image_data_url: Option<String>,
+    pub connected_at_ms: u128,
     pub last_update_ms: u128,
 }
 
@@ -337,12 +338,14 @@ fn upsert_student(
 ) {
     if let Ok(mut students) = students.lock() {
         if students.iter().all(|student| student.id != id) {
+            let now = now_ms();
             students.push(StudentSnapshot {
                 id,
                 name: String::from("Unknown"),
                 student_id: String::new(),
                 image_data_url: None,
-                last_update_ms: now_ms(),
+                connected_at_ms: now,
+                last_update_ms: now,
             });
         }
 

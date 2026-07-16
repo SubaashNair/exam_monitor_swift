@@ -99,7 +99,7 @@ function renderStudents() {
         <strong>${escapeHtml(student.name)}</strong>
         ${student.student_id ? `<small>${escapeHtml(student.student_id)}</small>` : ""}
       </span>
-      <small>${timeAgo(student.last_update_ms)}</small>
+      <small>${statusLabel(student)}</small>
     `;
 
     item.append(preview, footer);
@@ -124,12 +124,21 @@ function openStudent(student) {
   dialog.showModal();
 }
 
-function timeAgo(lastUpdateMs) {
-  const seconds = Math.max(0, Math.floor((Date.now() - Number(lastUpdateMs)) / 1000));
-  if (seconds < 15) return "Just now";
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  return `${Math.floor(seconds / 3600)}h ago`;
+function statusLabel(student) {
+  const sinceFrame = Math.floor((Date.now() - Number(student.last_update_ms)) / 1000);
+  if (sinceFrame > 15) {
+    return `⚠ no signal ${sinceFrame}s`;
+  }
+  return `connected ${formatDuration(Number(student.connected_at_ms))}`;
+}
+
+function formatDuration(startMs) {
+  const seconds = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+  return `${seconds}s`;
 }
 
 function escapeHtml(value) {

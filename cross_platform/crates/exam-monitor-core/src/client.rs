@@ -172,7 +172,10 @@ fn stream_frames(
     let mut sent_frames = 0_u64;
 
     while running.load(Ordering::SeqCst) {
-        match capture_primary_screen_jpeg(60, 720) {
+        // 1280px keeps the teacher's zoomed view sharp; 2fps matches what
+        // the dashboard actually displays (it polls at 1fps), so the wider
+        // frames don't cost extra bandwidth versus the old 720px at 5fps.
+        match capture_primary_screen_jpeg(60, 1280) {
             Ok(frame) => {
                 if let Err(error) = write_packet(stream, PacketType::Picture, &frame) {
                     connected.store(false, Ordering::SeqCst);
@@ -198,7 +201,7 @@ fn stream_frames(
             }
         }
 
-        thread::sleep(Duration::from_millis(200));
+        thread::sleep(Duration::from_millis(500));
     }
 }
 
