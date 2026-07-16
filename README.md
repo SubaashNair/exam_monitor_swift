@@ -1,22 +1,74 @@
-# Exam Monitor Swift
+# Exam Monitor
 
-A Swift-based application for monitoring exams, consisting of two main components:
+A local-network exam proctoring tool. A **server** app on the proctor's machine
+shows a live grid of every student's screen; a **client** app on each student's
+machine shares their screen over the local network. No internet or accounts
+required — the server and clients find each other automatically on the same
+Wi-Fi/LAN.
 
-1. **Client Monitor**: The application that runs on the student's computer during an exam
-   - Includes screen recording capabilities
-   - Requires screen capture permissions
+## Two implementations
 
-2. **Server Monitor**: The application that runs on the proctor's computer
-   - Manages and monitors connected clients
-   - Provides exam monitoring interface
+This repo contains two implementations of the same product:
 
-## Project Structure
+| | `cross_platform/` (Tauri + Rust) | `server_monitor/` & `client_monitor/` (Swift) |
+|---|---|---|
+| **Status** | ✅ **Active — this is what ships** | ⚠️ Superseded prototype |
+| **Platforms** | Windows, macOS, Linux | macOS only |
+| **Released to GitHub** | Yes — every release | No (build locally in Xcode) |
 
-- `client_monitor/`: Contains the client application code
-- `server_monitor/`: Contains the server application code
+The **Tauri app in `cross_platform/` is the product** — it is built and
+published for Windows, macOS, and Linux by CI on every release. The original
+**Swift apps are the macOS-only prototype** it was ported from; they still build
+and speak the same protocol, but they are not distributed. See
+[`cross_platform/README.md`](cross_platform/README.md) for full run/build/network
+docs.
 
-## Requirements
+**Students and proctors should install from the
+[Releases page](https://github.com/SubaashNair/exam_monitor_swift/releases)** —
+not build the Swift apps.
 
-- macOS
-- Xcode
-- Swift
+## Screenshots
+
+**Server — proctor dashboard** (live student grid, connection duration,
+disconnect tombstones, per-room join code, evidence logging):
+
+![Server dashboard](docs/screenshots/server-dashboard.png)
+
+**Client — student join screen:**
+
+![Client join screen](docs/screenshots/client-join.png)
+
+## How it works
+
+1. The proctor opens the server, enters an exam/class number, and starts a room.
+   The dashboard shows a 4-character **join code**.
+2. Each student opens the client, enters their name, the class number, and the
+   join code, then clicks **Start Sharing**.
+3. Clients discover the server automatically over the LAN (UDP), then stream
+   JPEG screen frames over TCP. The dashboard updates roughly once a second.
+
+## Install
+
+Download the right asset for each machine from the
+[latest release](https://github.com/SubaashNair/exam_monitor_swift/releases/latest):
+
+- **Windows (managed lab):** `Exam.Guard.*_x64_en-US.msi`
+- **Windows (personal laptop):** `Exam.Guard.*_x64-setup.exe`
+- **macOS (Apple Silicon):** `Exam-Guard-*-macOS-ARM64.zip`
+- **Linux:** `.deb`, `.rpm`, or `.AppImage`
+
+The server app is macOS/Windows/Linux; students install the **client**, the
+proctor installs the **server**. All machines must be on the same local network.
+
+## Repository layout
+
+- `cross_platform/` — the shipped Tauri + Rust apps (see its README for details)
+  - `crates/exam-monitor-core` — shared protocol, networking, capture, logging
+  - `apps/server`, `apps/client` — the two desktop apps
+- `server_monitor/`, `client_monitor/` — the superseded macOS-only Swift
+  prototype (kept for reference; not released)
+
+## Requirements to build
+
+- **Tauri apps:** Rust, Node.js, and the Tauri prerequisites for your platform
+- **Swift prototype:** macOS + Xcode
