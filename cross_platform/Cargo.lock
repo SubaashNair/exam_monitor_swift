@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "exam-monitor-client"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "exam-monitor-core",
  "serde",
@@ -850,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "exam-monitor-core"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -862,7 +862,7 @@ dependencies = [
 
 [[package]]
 name = "exam-monitor-server"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "exam-monitor-core",
  "serde",
@@ -3225,7 +3225,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stress-clients"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "exam-monitor-core",

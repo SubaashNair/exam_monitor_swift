@@ -66,7 +66,10 @@ label {
   font-weight: 600;
 }
 
-input {
+/* Exclude checkboxes: this full-width/36px styling is for text fields only.
+   Without the :not(), the clear-evidence checkbox inflated into a large box
+   and squeezed its label off the right edge of the footer. */
+input:not([type="checkbox"]) {
   width: 100%;
   height: 36px;
   border: 1px solid #cbd5e1;
@@ -74,6 +77,11 @@ input {
   padding: 0 10px;
   font: inherit;
   background: #ffffff;
+}
+
+.clear-toggle input[type="checkbox"] {
+  flex: none;
+  margin: 0;
 }
 
 button {
