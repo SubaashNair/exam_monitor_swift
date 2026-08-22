@@ -33,7 +33,7 @@ struct JoinView: View {
                     .font(.title)
                     .fontWeight(.semibold)
 
-                Text("Join a monitoring room to start sharing your screen.")
+                Text("Enter the class code on your teacher's screen.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -42,8 +42,6 @@ struct JoinView: View {
 
             VStack(spacing: 16) {
                 FieldRow(label: "Full Name", placeholder: "e.g. Ada Lovelace", text: $appState.studentName)
-
-                FieldRow(label: "Student ID", placeholder: "e.g. STU-2025-001", text: $appState.studentID)
 
                 FieldRow(label: "Class Code", placeholder: "4-character code on teacher's screen", text: $appState.joinCode)
                     .onChange(of: appState.joinCode) { _, newValue in
@@ -127,7 +125,6 @@ struct DashboardView: View {
                 Divider()
 
                 InfoRow(label: "Student name", value: appState.studentName)
-                InfoRow(label: "Student ID", value: appState.studentID)
                 InfoRow(label: "Class code", value: appState.joinCode)
             }
             .padding(20)

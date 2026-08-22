@@ -16,14 +16,12 @@ enum Screen {
 class AppState: ObservableObject {
     @Published var currentScreen: Screen = .join
     @Published var studentName: String = ""
-    @Published var studentID: String = ""
     @Published var joinCode: String = ""
 
     let client = Client()
 
     var isJoinFormValid: Bool {
         !studentName.trimmingCharacters(in: .whitespaces).isEmpty
-            && studentID.trimmingCharacters(in: .whitespaces).count >= 3
             && joinCode.trimmingCharacters(in: .whitespaces).count == 4
     }
 
@@ -46,7 +44,7 @@ class AppState: ObservableObject {
 
         client.start(
             studentName: studentName.trimmingCharacters(in: .whitespaces),
-            studentID: studentID.trimmingCharacters(in: .whitespaces),
+            studentID: "",
             joinCode: code,
             port: Int(portForCode(code))
         ) { [weak self] in

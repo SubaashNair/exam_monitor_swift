@@ -41,9 +41,11 @@ disconnect tombstones, per-room class code, evidence logging):
 ## How it works
 
 1. The proctor opens the server, enters the exam and course name, and clicks
-   **Start Monitoring**. The dashboard shows a 4-character **class code**.
-2. Each student opens the client, enters their name, student ID, and that class
-   code, then clicks **Start Sharing**. The code is the only thing to read out.
+   **Start Monitoring**. The dashboard shows a 4-character **class code**, large
+   enough to read across a room — with a **⛶ Project full screen** button for a
+   projector or second display.
+2. Each student opens the client, types that class code and their name, then
+   clicks **Start Sharing**. The code is the only thing to read out.
 3. Clients discover the server automatically over the LAN (UDP), then stream
    JPEG screen frames over TCP. The dashboard updates roughly once a second.
 

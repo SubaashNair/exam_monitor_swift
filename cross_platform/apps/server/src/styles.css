@@ -157,11 +157,88 @@ button:disabled {
   color: #52616f;
 }
 
+/* The empty state doubles as the join screen: while no student has connected,
+   the code is the biggest thing on the display so a class can read it off the
+   projector. Once tiles appear this section hides and the toolbar chip takes
+   over. */
 .empty {
   display: grid;
-  place-items: center;
+  place-content: center;
+  justify-items: center;
+  gap: 2px;
+  padding: 16px;
   color: #64748b;
-  font-size: 22px;
+}
+
+.empty-lbl {
+  font-size: 15px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.banner-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: clamp(72px, 16vw, 160px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: 0.14em;
+  text-indent: 0.14em;
+  color: #1d4ed8;
+}
+
+.banner-port {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.banner-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.empty-wait {
+  margin-top: 18px;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+/* Full-screen code for a projector or second display. */
+.projector {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  background: #0f172a;
+  cursor: pointer;
+}
+
+.projector-label {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  text-indent: 0.35em;
+  color: #93c5fd;
+}
+
+.projector-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: clamp(120px, 26vw, 320px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  color: #ffffff;
+}
+
+.projector-hint {
+  margin-top: 12px;
+  font-size: 14px;
+  color: #64748b;
 }
 
 .student-grid {

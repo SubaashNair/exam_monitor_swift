@@ -441,13 +441,19 @@ fn handle_student(
                     break;
                 }
                 // A reconnecting student replaces their own tombstone rather
-                // than showing twice.
-                if !student_id.is_empty() {
-                    drop_tombstones(&students, &student_id, id);
+                // than showing twice. Clients need not send a student ID, so
+                // fall back to the name as the identity key.
+                let identity_key = identity_key(&name, &student_id);
+                if !identity_key.is_empty() {
+                    drop_tombstones(&students, &identity_key, id);
                 }
                 identity = (name.clone(), student_id.clone());
                 upsert_student(&students, id, |student| {
-                    student.name = name;
+                    // Keep the "Unknown" seed rather than blanking the tile if
+                    // a client sends no name at all.
+                    if !name.is_empty() {
+                        student.name = name;
+                    }
                     student.student_id = student_id;
                     student.last_update_ms = now_ms();
                 });
@@ -510,12 +516,25 @@ fn handle_student(
     }
 }
 
-/// Remove offline tombstones for `student_id` other than the live connection
+/// How a student is recognised across reconnects: their ID when they send one,
+/// otherwise their name. Clients are not required to collect a student ID.
+fn identity_key(name: &str, student_id: &str) -> String {
+    if student_id.is_empty() {
+        name.trim().to_string()
+    } else {
+        student_id.to_string()
+    }
+}
+
+/// Remove offline tombstones matching `key` other than the live connection
 /// `keep_id`, so a reconnecting student collapses back to a single tile.
-fn drop_tombstones(students: &Arc<Mutex<Vec<StudentSnapshot>>>, student_id: &str, keep_id: u64) {
+fn drop_tombstones(students: &Arc<Mutex<Vec<StudentSnapshot>>>, key: &str, keep_id: u64) {
     if let Ok(mut students) = students.lock() {
-        students
-            .retain(|student| student.id == keep_id || student.connected || student.student_id != student_id);
+        students.retain(|student| {
+            student.id == keep_id
+                || student.connected
+                || identity_key(&student.name, &student.student_id) != key
+        });
     }
 }
 
@@ -587,10 +606,12 @@ fn run_evidence_logger(
                         .iter()
                         .filter(|student| student.connected)
                         .filter_map(|student| {
-                            let label = if student.student_id.is_empty() {
-                                format!("id{}", student.id)
-                            } else {
-                                student.student_id.clone()
+                            // Prefer a stable, human-meaningful filename; the
+                            // connection id changes on reconnect so it is the
+                            // last resort only.
+                            let label = match identity_key(&student.name, &student.student_id) {
+                                key if !key.is_empty() => key,
+                                _ => format!("id{}", student.id),
                             };
                             student
                                 .image_data_url
@@ -694,6 +715,73 @@ mod tests {
         assert_eq!(snapshot.join_code, code);
         assert_eq!(snapshot.students.len(), 1, "client should have registered");
         assert_eq!(snapshot.students[0].name, "Ada");
+    }
+
+    #[test]
+    fn identity_key_falls_back_to_name_without_a_student_id() {
+        assert_eq!(identity_key("Ada", "STU-1"), "STU-1");
+        assert_eq!(identity_key("Ada", ""), "Ada");
+        assert_eq!(identity_key("  Ada  ", ""), "Ada");
+        assert_eq!(identity_key("", ""), "");
+    }
+
+    /// Students are no longer asked for an ID, so reconnect dedup has to work
+    /// off the name alone — otherwise a dropped student who rejoins shows up
+    /// twice (live tile + their own tombstone).
+    #[test]
+    fn reconnect_without_student_id_replaces_tombstone() {
+        let port = 42_366;
+        let runtime = ServerRuntime::start(
+            String::from("Exam"),
+            String::from("Course"),
+            port.to_string(),
+            port,
+            None,
+            String::new(),
+        );
+
+        thread::sleep(Duration::from_millis(200));
+
+        // Join with a name but no student ID, then drop.
+        let mut first = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write_packet(&mut first, PacketType::Name, &identity_payload("", "Ada", "")).unwrap();
+        thread::sleep(Duration::from_millis(150));
+        drop(first);
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(runtime.snapshot().students.len(), 1, "tombstone expected");
+
+        // Same student rejoins — should collapse back to one live tile.
+        let mut second = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write_packet(&mut second, PacketType::Name, &identity_payload("", "Ada", "")).unwrap();
+        thread::sleep(Duration::from_millis(200));
+
+        let students = runtime.snapshot().students;
+        assert_eq!(students.len(), 1, "reconnect must not duplicate the tile");
+        assert!(students[0].connected);
+        assert_eq!(students[0].name, "Ada");
+    }
+
+    #[test]
+    fn empty_name_does_not_blank_the_tile() {
+        let port = 42_368;
+        let runtime = ServerRuntime::start(
+            String::from("Exam"),
+            String::from("Course"),
+            port.to_string(),
+            port,
+            None,
+            String::new(),
+        );
+
+        thread::sleep(Duration::from_millis(200));
+
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write_packet(&mut stream, PacketType::Name, &identity_payload("", "", "")).unwrap();
+        thread::sleep(Duration::from_millis(200));
+
+        let students = runtime.snapshot().students;
+        assert_eq!(students.len(), 1);
+        assert_eq!(students[0].name, "Unknown", "must not render a blank tile");
     }
 
     #[test]

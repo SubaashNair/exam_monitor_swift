@@ -4,7 +4,6 @@ const joinScreen = document.querySelector("#join-screen");
 const dashboardScreen = document.querySelector("#dashboard-screen");
 const form = document.querySelector("#join-form");
 const nameInput = document.querySelector("#student-name");
-const idInput = document.querySelector("#student-id");
 const joinCodeInput = document.querySelector("#join-code");
 const serverIpInput = document.querySelector("#server-ip");
 const startButton = document.querySelector("#start-button");
@@ -14,7 +13,6 @@ const statusMessage = document.querySelector("#status-message");
 const statusDot = document.querySelector("#status-dot");
 const connectionLabel = document.querySelector("#connection-label");
 const summaryName = document.querySelector("#summary-name");
-const summaryId = document.querySelector("#summary-id");
 const summaryRoom = document.querySelector("#summary-room");
 
 let pollTimer = null;
@@ -22,7 +20,6 @@ let pollTimer = null;
 function isValid() {
   return (
     nameInput.value.trim().length > 0 &&
-    idInput.value.trim().length >= 3 &&
     joinCodeInput.value.trim().length === 4
   );
 }
@@ -59,7 +56,7 @@ function stopPolling() {
   }
 }
 
-for (const input of [nameInput, idInput, joinCodeInput]) {
+for (const input of [nameInput, joinCodeInput]) {
   input.addEventListener("input", updateFormState);
 }
 
@@ -76,13 +73,11 @@ form.addEventListener("submit", async (event) => {
   try {
     await invoke("start_client", {
       studentName: nameInput.value.trim(),
-      studentId: idInput.value.trim(),
       serverIp: serverIpInput.value.trim() || null,
       joinCode: joinCodeInput.value.trim()
     });
 
     summaryName.textContent = nameInput.value.trim();
-    summaryId.textContent = idInput.value.trim();
     summaryRoom.textContent = joinCodeInput.value.trim();
     setScreen("dashboard");
     startPolling();

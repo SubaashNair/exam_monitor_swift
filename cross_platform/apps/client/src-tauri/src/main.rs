@@ -16,7 +16,6 @@ struct ClientState {
 fn start_client(
     state: State<'_, ClientState>,
     student_name: String,
-    student_id: String,
     server_ip: Option<String>,
     join_code: String,
 ) -> Result<(), String> {
@@ -40,7 +39,9 @@ fn start_client(
 
     *runtime = Some(ClientRuntime::start(
         student_name,
-        student_id,
+        // Students are no longer asked for an ID; the core keeps the field so
+        // the wire format (and older clients) stay unchanged.
+        String::new(),
         port,
         server_ip,
         join_code,

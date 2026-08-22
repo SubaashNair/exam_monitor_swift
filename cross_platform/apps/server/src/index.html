@@ -51,7 +51,16 @@
         </div>
       </header>
 
-      <section id="empty-state" class="empty">Waiting for students to connect...</section>
+      <section id="empty-state" class="empty">
+        <p class="empty-lbl">Students enter this code</p>
+        <p id="banner-code" class="banner-code">----</p>
+        <p id="banner-port" class="banner-port"></p>
+        <div class="banner-actions">
+          <button id="banner-copy" class="secondary" type="button">Copy</button>
+          <button id="project-button" type="button">⛶ Project full screen</button>
+        </div>
+        <p class="empty-wait">Waiting for students to connect…</p>
+      </section>
       <section id="student-grid" class="student-grid"></section>
       <footer class="session-bar">
         <label class="clear-toggle">
@@ -61,6 +70,12 @@
         <p id="log-dir" class="log-dir"></p>
       </footer>
     </main>
+
+    <div id="projector" class="projector hidden">
+      <p class="projector-label">JOIN CODE</p>
+      <p id="projector-code" class="projector-code">----</p>
+      <p class="projector-hint">Open Exam Guard and enter this code · press Esc to close</p>
+    </div>
 
     <dialog id="student-dialog">
       <article>

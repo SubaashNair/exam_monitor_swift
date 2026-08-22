@@ -151,3 +151,38 @@ dd {
   color: rgba(128, 128, 128, 0.8);
   pointer-events: none;
 }
+
+/* The class code is the one thing a student must type, so it gets the
+   emphasis: large, monospaced and spaced out to match how it is displayed
+   on the proctor's screen. */
+.code-field span {
+  text-align: center;
+}
+
+.code-input {
+  height: 64px;
+  text-align: center;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: 10px;
+  text-indent: 10px;
+  color: #1d4ed8;
+  border-width: 2px;
+  border-color: #2563eb;
+  text-transform: uppercase;
+}
+
+.advanced {
+  margin-top: 4px;
+}
+
+.advanced summary {
+  font-size: 13px;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.advanced label {
+  margin-top: 10px;
+}

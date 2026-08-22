@@ -11,28 +11,28 @@
       <section class="stack">
         <header class="header">
           <h1>Exam Guard Client</h1>
-          <p>Join a monitoring class to start sharing your screen.</p>
+          <p>Enter the class code on your teacher's screen.</p>
         </header>
 
         <form id="join-form" class="form">
+          <label class="code-field">
+            <span>Class Code</span>
+            <input id="join-code" class="code-input" autocomplete="off" maxlength="4"
+                   inputmode="latin" placeholder="････" aria-label="Class code" />
+          </label>
           <label>
             <span>Full Name</span>
             <input id="student-name" autocomplete="name" placeholder="e.g. Ada Lovelace" />
           </label>
-          <label>
-            <span>Student ID</span>
-            <input id="student-id" autocomplete="off" placeholder="e.g. STU-2025-001" />
-          </label>
-          <label>
-            <span>Class Code</span>
-            <input id="join-code" autocomplete="off" maxlength="4" placeholder="4-character code on teacher's screen" />
-          </label>
-          <label>
-            <span>Server IP (optional)</span>
-            <input id="server-ip" autocomplete="off" placeholder="Auto-detect, or e.g. 192.168.0.10" />
-          </label>
           <button id="start-button" type="submit" disabled>Start Sharing</button>
           <p id="join-error" class="error" hidden></p>
+          <details class="advanced">
+            <summary>Advanced</summary>
+            <label>
+              <span>Server IP (optional)</span>
+              <input id="server-ip" autocomplete="off" placeholder="Auto-detect, or e.g. 192.168.0.10" />
+            </label>
+          </details>
         </form>
       </section>
     </main>
@@ -53,10 +53,6 @@
             <div>
               <dt>Student name</dt>
               <dd id="summary-name">-</dd>
-            </div>
-            <div>
-              <dt>Student ID</dt>
-              <dd id="summary-id">-</dd>
             </div>
             <div>
               <dt>Class code</dt>

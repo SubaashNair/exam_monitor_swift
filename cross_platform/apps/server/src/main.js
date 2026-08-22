@@ -17,6 +17,12 @@ const logDir = document.querySelector("#log-dir");
 const joinCodeChip = document.querySelector("#join-code-chip");
 const joinCodeValue = document.querySelector("#join-code");
 const joinPort = document.querySelector("#join-port");
+const bannerCode = document.querySelector("#banner-code");
+const bannerPort = document.querySelector("#banner-port");
+const bannerCopy = document.querySelector("#banner-copy");
+const projectButton = document.querySelector("#project-button");
+const projector = document.querySelector("#projector");
+const projectorCode = document.querySelector("#projector-code");
 const clearEvidence = document.querySelector("#clear-evidence");
 const removeColumn = document.querySelector("#remove-column");
 const addColumn = document.querySelector("#add-column");
@@ -127,9 +133,15 @@ async function pollStatus() {
   logDir.textContent = status.log_dir ? `Saving evidence to: ${status.log_dir}` : "";
 
   if (status.join_code) {
+    const portHint = status.port ? `port ${status.port} · for students on an older client` : "";
     joinCodeValue.textContent = status.join_code;
     joinPort.textContent = status.port ? `port ${status.port} · older clients` : "";
-    joinCodeChip.hidden = false;
+    bannerCode.textContent = status.join_code;
+    bannerPort.textContent = portHint;
+    projectorCode.textContent = status.join_code;
+    // One code on screen at a time: the big banner owns the empty room, the
+    // toolbar chip takes over once there are tiles to watch.
+    joinCodeChip.hidden = latestStudents.length === 0;
   } else {
     joinCodeChip.hidden = true;
   }
@@ -301,11 +313,23 @@ async function copyClassCode() {
   }
 }
 
+function setProjector(open) {
+  projector.classList.toggle("hidden", !open);
+}
+
 for (const input of [examInput, courseInput]) {
   input.addEventListener("input", updateFormState);
 }
 
 joinCodeChip.addEventListener("click", copyClassCode);
+bannerCopy.addEventListener("click", copyClassCode);
+projectButton.addEventListener("click", () => setProjector(true));
+projector.addEventListener("click", () => setProjector(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !projector.classList.contains("hidden")) {
+    setProjector(false);
+  }
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -334,6 +358,7 @@ stopButton.addEventListener("click", async () => {
   tileEls.clear();
   if (dialog.open) dialog.close();
   clearEvidence.checked = false;
+  setProjector(false);
   setScreen("home");
 });
 

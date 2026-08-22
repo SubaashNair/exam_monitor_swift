@@ -368,7 +368,11 @@ class Server: NSObject, ObservableObject {
                 }
 
                 print("SERVER: Received identity name=\(name) id=\(studentID)")
-                self.students[index].name = name
+                // Keep the "Unknown" seed rather than blanking the tile when a
+                // client sends no name.
+                if !name.isEmpty {
+                    self.students[index].name = name
+                }
                 self.students[index].studentID = studentID
                 self.students[index].isVerified = true
             }

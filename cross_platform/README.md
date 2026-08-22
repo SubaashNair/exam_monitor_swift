@@ -7,7 +7,7 @@ The MVP keeps the same product model:
 - Server app creates a monitoring room and generates its class code.
 - The class code is the room's only identifier; its network port is derived
   from the code, so nobody types a port.
-- Client app joins with student name, student ID, and the class code.
+- Client app joins with the class code and the student's name.
 - Client sends identity first.
 - Client captures the screen periodically and sends JPEG frames.
 - Server dashboard displays connected students and latest screen frames.
@@ -76,7 +76,13 @@ Students enter that code and nothing else — the port is derived from it, and t
 code doubles as the password, so a bystander who only overhears the room cannot
 impersonate a classmate.
 
-Read the code out to the class, or show it on a projector, when the exam starts.
+While no student has joined, the code fills the dashboard so a class can read
+it from across the room; it shrinks to a toolbar chip once tiles appear. The
+**⛶ Project full screen** button shows the code alone on a dark background for a
+projector or second display (Esc or click to exit).
+
+Students enter the code and their name — nothing else. The name is what labels
+their tile, drives search/sort, and names their evidence files.
 
 ### Students on an older client
 
@@ -94,7 +100,8 @@ exact path is shown at the bottom of the dashboard). The folder contains:
 - `events.csv` — an audit trail of every connect / disconnect / reconnect with
   UTC timestamps, name, and student ID.
 - Periodic JPEG snapshots of each connected student's screen, saved every 60
-  seconds as `<student-id>_<epoch>.jpg`.
+  seconds as `<student-name>_<epoch>.jpg` (a student ID is used instead when an
+  older client supplies one).
 
 Disk use scales with class size and duration: roughly `students × 60` images
 per hour (e.g. 30 students for 2 hours ≈ 3,600 small JPEGs). Delete old session
