@@ -13,6 +13,17 @@ import AVFoundation
 import ImageIO
 import UniformTypeIdentifiers
 
+/// Map a class code to the port its room listens on. Must stay byte-identical
+/// to `port_for_code` in the Rust core and `portForCode` in the server app.
+func portForCode(_ code: String) -> UInt16 {
+    var hash: UInt32 = 2_166_136_261
+    for byte in Array(code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().utf8) {
+        hash ^= UInt32(byte)
+        hash = hash &* 16_777_619
+    }
+    return UInt16(20_000 + (hash % 25_000))
+}
+
 enum PacketType: UInt16 {
     case name = 0
     case message = 1

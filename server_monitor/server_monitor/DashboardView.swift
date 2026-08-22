@@ -468,9 +468,6 @@ struct DashboardView: View {
                         if !server.courseName.isEmpty {
                             Text(server.courseName)
                         }
-                        if !server.roomNumber.isEmpty {
-                            Text("• Room \(server.roomNumber)")
-                        }
                         Text("• \(server.students.count) connected")
                     }
                     .font(.subheadline)
@@ -479,13 +476,18 @@ struct DashboardView: View {
 
                 if !server.joinCode.isEmpty {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Join code")
+                        Text("Class code")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                         Text(server.joinCode)
                             .font(.system(.title3, design: .monospaced))
                             .fontWeight(.semibold)
                             .tracking(2)
+                        if server.listeningPort > 0 {
+                            Text("port \(server.listeningPort) · older clients")
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                        }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)

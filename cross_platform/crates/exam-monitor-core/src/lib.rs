@@ -6,4 +6,4 @@ pub mod protocol;
 pub mod server;
 
 pub use client::{ClientRuntime, ClientSnapshot};
-pub use server::{generate_join_code, ServerRuntime, ServerSnapshot, StudentSnapshot};
+pub use server::{generate_join_code, port_for_code, ServerRuntime, ServerSnapshot, StudentSnapshot};

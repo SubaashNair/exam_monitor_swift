@@ -2,7 +2,8 @@
 // the packaged .exe is built for the console subsystem and pops a terminal.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use exam_monitor_core::{generate_join_code, ServerRuntime, ServerSnapshot};
+use exam_monitor_core::{generate_join_code, port_for_code, ServerRuntime, ServerSnapshot};
+use std::net::TcpListener;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, RunEvent, State};
 
@@ -17,9 +18,7 @@ fn start_server(
     state: State<'_, ServerState>,
     exam_name: String,
     course_name: String,
-    room_number: String,
 ) -> Result<(), String> {
-    let port = parse_room_number(&room_number)?;
     let mut runtime = state
         .runtime
         .lock()
@@ -33,19 +32,36 @@ fn start_server(
     // resolved we run without logging rather than failing to start.
     let log_base_dir = app.path().app_log_dir().ok();
 
-    // Every room gets a join code students must enter, so a bystander who only
-    // knows the room number can't connect.
-    let join_code = generate_join_code();
+    // The class code is the room's only identifier: students type it, and the
+    // port is derived from it. Re-roll if that port is already in use so a
+    // clash heals itself instead of surfacing an error to the teacher.
+    let (join_code, port) = pick_available_code()?;
 
     *runtime = Some(ServerRuntime::start(
         exam_name,
         course_name,
-        room_number,
+        join_code.clone(),
         port,
         log_base_dir,
         join_code,
     ));
     Ok(())
+}
+
+/// Generate a class code whose derived port we can actually bind.
+fn pick_available_code() -> Result<(String, u16), String> {
+    for _ in 0..10 {
+        let code = generate_join_code();
+        let port = port_for_code(&code);
+        // Probe-and-release: the real listener binds moments later. The race
+        // window is negligible for one teacher starting one room.
+        if TcpListener::bind(("0.0.0.0", port)).is_ok() {
+            return Ok((code, port));
+        }
+    }
+    Err(String::from(
+        "could not find a free class code, please try again",
+    ))
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -108,24 +124,13 @@ fn server_status(state: State<'_, ServerState>) -> Result<ServerSnapshot, String
             students: Vec::new(),
             log_dir: None,
             join_code: String::new(),
+            port: 0,
         }))
 }
 
 #[tauri::command]
 fn app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
-}
-
-fn parse_room_number(value: &str) -> Result<u16, String> {
-    let port: u16 = value
-        .parse()
-        .map_err(|_| String::from("class number must be a valid port"))?;
-
-    if port == 0 {
-        return Err(String::from("class number must be greater than zero"));
-    }
-
-    Ok(port)
 }
 
 fn main() {

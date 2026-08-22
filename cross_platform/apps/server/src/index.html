@@ -23,16 +23,8 @@
             <span>Course / Module</span>
             <input id="course-name" placeholder="e.g. CS3010 Distributed Systems" />
           </label>
-          <label>
-            <span>Class Number</span>
-            <div class="class-number-row">
-              <input id="room-number" inputmode="numeric" maxlength="4" placeholder="4-digit class code" />
-              <button id="generate-room" class="secondary" type="button">Generate</button>
-              <button id="copy-room" class="secondary" type="button" disabled>Copy</button>
-            </div>
-            <small id="copy-status" class="copy-status">Share this class number with students</small>
-          </label>
           <button id="create-button" type="submit" disabled>Start Monitoring</button>
+          <small class="form-hint">A class code for students is created when you start.</small>
           <p id="room-error" class="error" hidden></p>
         </form>
       </section>
@@ -46,9 +38,11 @@
         </section>
 
         <div class="toolbar-actions">
-          <span id="join-code-chip" class="join-code-chip" hidden>
-            Join code <strong id="join-code">----</strong>
-          </span>
+          <button id="join-code-chip" class="join-code-chip" type="button" hidden title="Click to copy">
+            <span class="jc-label">Class code</span>
+            <strong id="join-code">----</strong>
+            <span id="join-port" class="jc-port"></span>
+          </button>
           <input id="student-search" class="search" type="search" placeholder="Search name or ID" />
           <button id="remove-column" class="icon-button" type="button">-</button>
           <span id="column-label">1 column</span>

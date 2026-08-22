@@ -30,7 +30,7 @@ not build the Swift apps.
 ## Screenshots
 
 **Server — proctor dashboard** (live student grid, connection duration,
-disconnect tombstones, per-room join code, evidence logging):
+disconnect tombstones, per-room class code, evidence logging):
 
 ![Server dashboard](docs/screenshots/server-dashboard.png)
 
@@ -40,12 +40,19 @@ disconnect tombstones, per-room join code, evidence logging):
 
 ## How it works
 
-1. The proctor opens the server, enters an exam/class number, and starts a room.
-   The dashboard shows a 4-character **join code**.
-2. Each student opens the client, enters their name, the class number, and the
-   join code, then clicks **Start Sharing**.
+1. The proctor opens the server, enters the exam and course name, and clicks
+   **Start Monitoring**. The dashboard shows a 4-character **class code**.
+2. Each student opens the client, enters their name, student ID, and that class
+   code, then clicks **Start Sharing**. The code is the only thing to read out.
 3. Clients discover the server automatically over the LAN (UDP), then stream
    JPEG screen frames over TCP. The dashboard updates roughly once a second.
+
+The code is both the room's address and its password: the network port is
+derived from it, so nobody types a port number.
+
+**Students on an older client (v0.1.10–v0.1.12)** still work — their join screen
+also asks for a "Class Number", so give them the small `port …` value shown
+under the code on the dashboard.
 
 ## Install
 

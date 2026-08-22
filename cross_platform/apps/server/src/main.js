@@ -5,10 +5,6 @@ const dashboardScreen = document.querySelector("#dashboard-screen");
 const form = document.querySelector("#room-form");
 const examInput = document.querySelector("#exam-name");
 const courseInput = document.querySelector("#course-name");
-const roomInput = document.querySelector("#room-number");
-const generateRoomButton = document.querySelector("#generate-room");
-const copyRoomButton = document.querySelector("#copy-room");
-const copyStatus = document.querySelector("#copy-status");
 const createButton = document.querySelector("#create-button");
 const roomError = document.querySelector("#room-error");
 const stopButton = document.querySelector("#stop-button");
@@ -20,6 +16,7 @@ const searchInput = document.querySelector("#student-search");
 const logDir = document.querySelector("#log-dir");
 const joinCodeChip = document.querySelector("#join-code-chip");
 const joinCodeValue = document.querySelector("#join-code");
+const joinPort = document.querySelector("#join-port");
 const clearEvidence = document.querySelector("#clear-evidence");
 const removeColumn = document.querySelector("#remove-column");
 const addColumn = document.querySelector("#add-column");
@@ -37,14 +34,12 @@ let latestStudents = [];
 function isValid() {
   return (
     examInput.value.trim().length > 0 &&
-    courseInput.value.trim().length > 0 &&
-    roomInput.value.trim().length === 4
+    courseInput.value.trim().length > 0
   );
 }
 
 function updateFormState() {
   createButton.disabled = !isValid();
-  copyRoomButton.disabled = roomInput.value.trim().length !== 4;
 }
 
 function setScreen(screen) {
@@ -123,7 +118,7 @@ async function pollStatus() {
 
   const parts = [];
   if (status.course_name) parts.push(status.course_name);
-  if (status.room_number) parts.push(`Class ${status.room_number}`);
+  if (status.join_code) parts.push(`Class ${status.join_code}`);
   parts.push(`${connected} connected`);
   if (noSignal > 0) parts.push(`${noSignal} no-signal`);
   if (offline > 0) parts.push(`${offline} disconnected`);
@@ -133,6 +128,7 @@ async function pollStatus() {
 
   if (status.join_code) {
     joinCodeValue.textContent = status.join_code;
+    joinPort.textContent = status.port ? `port ${status.port} · older clients` : "";
     joinCodeChip.hidden = false;
   } else {
     joinCodeChip.hidden = true;
@@ -293,48 +289,23 @@ function stopPolling() {
   }
 }
 
-function generateClassNumber() {
-  return String(Math.floor(Math.random() * 8000) + 2000);
-}
-
-async function copyClassNumber() {
-  const value = roomInput.value.trim();
-  if (value.length !== 4) return;
-
+async function copyClassCode() {
+  const value = joinCodeValue.textContent.trim();
+  if (!value || value === "----") return;
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
-    } else {
-      roomInput.select();
-      document.execCommand("copy");
-      roomInput.blur();
-    }
-
-    copyStatus.textContent = "Copied";
+    await navigator.clipboard?.writeText(value);
+    joinCodeChip.classList.add("copied");
+    window.setTimeout(() => joinCodeChip.classList.remove("copied"), 1200);
   } catch (error) {
-    copyStatus.textContent = "Copy failed";
+    console.error("copy failed", error);
   }
 }
 
-for (const input of [examInput, courseInput, roomInput]) {
+for (const input of [examInput, courseInput]) {
   input.addEventListener("input", updateFormState);
 }
 
-roomInput.addEventListener("input", () => {
-  roomInput.value = roomInput.value.replace(/\D/g, "").slice(0, 4);
-  copyStatus.textContent = "Share this class number with students";
-  updateFormState();
-});
-
-generateRoomButton.addEventListener("click", () => {
-  roomInput.value = generateClassNumber();
-  roomError.hidden = true;
-  copyStatus.textContent = "Share this class number with students";
-  updateFormState();
-  roomInput.focus();
-});
-
-copyRoomButton.addEventListener("click", copyClassNumber);
+joinCodeChip.addEventListener("click", copyClassCode);
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -343,8 +314,7 @@ form.addEventListener("submit", async (event) => {
   try {
     await invoke("start_server", {
       examName: examInput.value.trim(),
-      courseName: courseInput.value.trim(),
-      roomNumber: roomInput.value.trim()
+      courseName: courseInput.value.trim()
     });
 
     setScreen("dashboard");

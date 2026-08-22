@@ -49,6 +49,9 @@ pub struct ServerSnapshot {
     pub log_dir: Option<String>,
     /// The room's join code, shown to the teacher to read out to students.
     pub join_code: String,
+    /// Port derived from the join code. Surfaced only so the dashboard can
+    /// show it for students still on an older client that asks for a number.
+    pub port: u16,
 }
 
 pub struct ServerRuntime {
@@ -59,6 +62,7 @@ pub struct ServerRuntime {
     course_name: String,
     room_number: String,
     join_code: String,
+    port: u16,
     log_dir: Option<String>,
     session_dir: Option<PathBuf>,
     clear_on_finish: Arc<AtomicBool>,
@@ -128,6 +132,7 @@ impl ServerRuntime {
             course_name,
             room_number,
             join_code,
+            port,
             log_dir,
             session_dir,
             clear_on_finish: Arc::new(AtomicBool::new(false)),
@@ -213,6 +218,7 @@ impl ServerRuntime {
                 .unwrap_or_default(),
             log_dir: self.log_dir.clone(),
             join_code: self.join_code.clone(),
+            port: self.port,
         }
     }
 }
@@ -236,6 +242,21 @@ pub fn generate_join_code() -> String {
         code.push(ALPHABET[(seed % ALPHABET.len() as u64) as usize] as char);
     }
     code
+}
+
+/// Map a class code to the port its room listens on, so students only ever
+/// need the code — the port is derived, not typed.
+///
+/// Deterministic FNV-1a. The Swift apps duplicate this exactly; the test
+/// vectors below are asserted in both languages to keep them in lockstep.
+pub fn port_for_code(code: &str) -> u16 {
+    let mut hash: u32 = 2_166_136_261;
+    for byte in code.trim().to_uppercase().bytes() {
+        hash ^= u32::from(byte);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    // 20000..=44999: above privileged ports, below the ephemeral range.
+    20_000 + (hash % 25_000) as u16
 }
 
 impl Drop for ServerRuntime {
@@ -603,6 +624,77 @@ mod tests {
     use super::*;
     use crate::protocol::{identity_payload, write_packet};
     use std::net::TcpStream;
+
+    #[test]
+    fn port_for_code_is_deterministic_and_in_range() {
+        for code in ["N7KU", "MATH", "AAAA", "ZZ99", "7GK4"] {
+            let port = port_for_code(code);
+            assert_eq!(port, port_for_code(code), "must be stable");
+            assert!((20_000..=44_999).contains(&port), "{code} -> {port} out of range");
+        }
+    }
+
+    #[test]
+    fn port_for_code_ignores_case_and_padding() {
+        assert_eq!(port_for_code("math"), port_for_code("MATH"));
+        assert_eq!(port_for_code("  MATH \n"), port_for_code("MATH"));
+    }
+
+    #[test]
+    fn port_for_code_separates_distinct_codes() {
+        let codes = ["N7KU", "MATH", "AAAA", "ZZ99", "7GK4", "ABCD"];
+        let mut ports: Vec<u16> = codes.iter().map(|c| port_for_code(c)).collect();
+        ports.sort_unstable();
+        ports.dedup();
+        assert_eq!(ports.len(), codes.len(), "codes collided on a port");
+    }
+
+    /// Cross-language contract: the Swift apps derive ports with the same
+    /// algorithm and assert these exact numbers. Changing them breaks
+    /// Swift<->Tauri interoperability, so treat a failure here as a protocol
+    /// change, not a test to update.
+    #[test]
+    fn port_vectors_match_the_swift_implementation() {
+        assert_eq!(port_for_code("N7KU"), 38_242);
+        assert_eq!(port_for_code("MATH"), 34_703);
+        assert_eq!(port_for_code("AAAA"), 37_697);
+    }
+
+    /// End-to-end shape of the v0.2.0 flow: the server binds the port derived
+    /// from its class code, and a client that knows only the code derives the
+    /// same port and registers. This also covers an older client that types
+    /// the port and code by hand — on the wire the two are identical.
+    #[test]
+    fn class_code_alone_reaches_the_room() {
+        let code = "TEST";
+        let port = port_for_code(code);
+        let runtime = ServerRuntime::start(
+            String::from("Exam"),
+            String::from("Course"),
+            String::from(code),
+            port,
+            None,
+            String::from(code),
+        );
+
+        thread::sleep(Duration::from_millis(200));
+
+        // The client side knows only the code.
+        let mut stream = TcpStream::connect(("127.0.0.1", port_for_code(code))).unwrap();
+        write_packet(
+            &mut stream,
+            PacketType::Name,
+            &identity_payload(code, "Ada", "STU-1"),
+        )
+        .unwrap();
+        thread::sleep(Duration::from_millis(200));
+
+        let snapshot = runtime.snapshot();
+        assert_eq!(snapshot.port, port, "snapshot must expose the derived port");
+        assert_eq!(snapshot.join_code, code);
+        assert_eq!(snapshot.students.len(), 1, "client should have registered");
+        assert_eq!(snapshot.students[0].name, "Ada");
+    }
 
     #[test]
     fn stop_disconnects_connected_students() {

@@ -4,9 +4,10 @@ This workspace ports the Swift app flow to a Rust core plus Tauri desktop shells
 
 The MVP keeps the same product model:
 
-- Server app creates a monitoring room.
-- Room number is used as the network port.
-- Client app joins with student name, student ID, and room number.
+- Server app creates a monitoring room and generates its class code.
+- The class code is the room's only identifier; its network port is derived
+  from the code, so nobody types a port.
+- Client app joins with student name, student ID, and the class code.
 - Client sends identity first.
 - Client captures the screen periodically and sends JPEG frames.
 - Server dashboard displays connected students and latest screen frames.
@@ -51,29 +52,38 @@ npm install
 npm run tauri dev
 ```
 
-Use the same 4-digit room number in both apps.
+Start the server first, then type the class code it shows into the client.
 
 ## How Discovery Works
 
 The client finds the server in three ways, in order:
 
 1. Direct connection to a manually entered server IP (the optional "Server IP" field in the client).
-2. UDP probe: the client broadcasts `discover` to every local subnet's broadcast address on the room port; the server replies `server` directly to the client.
-3. Server beacon: the server broadcasts `server` every 2 seconds to the same addresses, and the client listens on the room port.
+2. UDP probe: the client broadcasts `discover` to every local subnet's broadcast address on the room's port; the server replies `server` directly to the client.
+3. Server beacon: the server broadcasts `server` every 2 seconds to the same addresses, and the client listens on that port.
+
+The port is not typed by anyone — both sides compute it from the class code
+with the same function (`port_for_code`, mirrored in the Swift apps), so the
+code alone is enough to find the room.
 
 The teacher's IP for manual entry is shown by `ipconfig` (Windows) or System Settings → Network (macOS).
 
-## Room Join Code
+## Class Code
 
-From v0.1.10, every room shows a 4-character **join code** (e.g. `7GK4`) next
-to the class number on the teacher's dashboard. Students must enter both the
-class number and this code to connect — a bystander who only overhears the room
-number can no longer join or impersonate a classmate.
+From v0.2.0 a room has a single identifier: a 4-character **class code** (e.g.
+`7GK4`) generated when the teacher clicks Start and shown on the dashboard.
+Students enter that code and nothing else — the port is derived from it, and the
+code doubles as the password, so a bystander who only overhears the room cannot
+impersonate a classmate.
 
-Because the code is part of the connection handshake, **all students must run
-the v0.1.10 (or newer) client** — older clients that don't send a code are
-rejected. Read the code out to the class, or show it on a projector, when the
-exam starts.
+Read the code out to the class, or show it on a projector, when the exam starts.
+
+### Students on an older client
+
+The wire protocol did not change in v0.2.0, so clients from v0.1.10–v0.1.12
+still work. Their join screen asks for a "Class Number" as well: give them the
+small `port …` value shown under the code on the dashboard, plus the code
+itself. Clients older than v0.1.10 send no code at all and are rejected.
 
 ## Session Evidence Logging
 
@@ -169,19 +179,15 @@ Before sharing with real users, add platform signing/notarization:
 ## Stress Test
 
 Start the server app and create a room first. Then run synthetic clients against
-that room number, passing the room's join code with `--code` (v0.1.10+ servers
-reject connections without the correct code):
+the room, passing its class code with `--code` — the port is derived from the
+code, so `--port` is only needed to override it:
 
 ```bash
 cd cross_platform
-cargo run -p stress-clients -- --host 127.0.0.1 --port 1234 --clients 20 --fps 5 --seconds 60 --code ABCD
+cargo run -p stress-clients -- --host 127.0.0.1 --code ABCD --clients 20 --fps 5 --seconds 60
 ```
 
 The tool sends the same protocol as the real client: one identity packet followed by JPEG frame packets.
-
-## Class Number Wireframe
-
-![Class number generate and copy wireframe](docs/class-number-wireframe.png)
 
 ## App Icon
 

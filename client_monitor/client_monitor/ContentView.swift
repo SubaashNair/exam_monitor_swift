@@ -45,13 +45,7 @@ struct JoinView: View {
 
                 FieldRow(label: "Student ID", placeholder: "e.g. STU-2025-001", text: $appState.studentID)
 
-                FieldRow(label: "Room Number", placeholder: "4-digit room code", text: $appState.roomNumber)
-                    .onChange(of: appState.roomNumber) { _, newValue in
-                        let filtered = String(newValue.filter { $0.isNumber }.prefix(4))
-                        if filtered != newValue { appState.roomNumber = filtered }
-                    }
-
-                FieldRow(label: "Join Code", placeholder: "4-letter code on teacher's screen", text: $appState.joinCode)
+                FieldRow(label: "Class Code", placeholder: "4-character code on teacher's screen", text: $appState.joinCode)
                     .onChange(of: appState.joinCode) { _, newValue in
                         let allowed = Set("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
                         let filtered = String(newValue.uppercased().filter { allowed.contains($0) }.prefix(4))
@@ -134,7 +128,7 @@ struct DashboardView: View {
 
                 InfoRow(label: "Student name", value: appState.studentName)
                 InfoRow(label: "Student ID", value: appState.studentID)
-                InfoRow(label: "Room number", value: appState.roomNumber)
+                InfoRow(label: "Class code", value: appState.joinCode)
             }
             .padding(20)
             .background(Color(NSColor.controlBackgroundColor))

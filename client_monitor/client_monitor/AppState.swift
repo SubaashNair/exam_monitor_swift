@@ -17,7 +17,6 @@ class AppState: ObservableObject {
     @Published var currentScreen: Screen = .join
     @Published var studentName: String = ""
     @Published var studentID: String = ""
-    @Published var roomNumber: String = ""
     @Published var joinCode: String = ""
 
     let client = Client()
@@ -25,7 +24,6 @@ class AppState: ObservableObject {
     var isJoinFormValid: Bool {
         !studentName.trimmingCharacters(in: .whitespaces).isEmpty
             && studentID.trimmingCharacters(in: .whitespaces).count >= 3
-            && Int(roomNumber).map { $0 > 0 } == true
             && joinCode.trimmingCharacters(in: .whitespaces).count == 4
     }
 
@@ -42,13 +40,15 @@ class AppState: ObservableObject {
     }
 
     func startClient() {
-        guard isJoinFormValid, let roomNum = Int(roomNumber) else { return }
+        guard isJoinFormValid else { return }
+        // The class code alone identifies the room; the port comes from it.
+        let code = joinCode.trimmingCharacters(in: .whitespaces).uppercased()
 
         client.start(
             studentName: studentName.trimmingCharacters(in: .whitespaces),
             studentID: studentID.trimmingCharacters(in: .whitespaces),
-            joinCode: joinCode.trimmingCharacters(in: .whitespaces).uppercased(),
-            port: roomNum
+            joinCode: code,
+            port: Int(portForCode(code))
         ) { [weak self] in
             DispatchQueue.main.async {
                 self?.objectWillChange.send()

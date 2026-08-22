@@ -2,7 +2,7 @@
 // the packaged .exe is built for the console subsystem and pops a terminal.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use exam_monitor_core::{ClientRuntime, ClientSnapshot};
+use exam_monitor_core::{port_for_code, ClientRuntime, ClientSnapshot};
 use std::net::IpAddr;
 use std::sync::Mutex;
 use tauri::State;
@@ -17,16 +17,18 @@ fn start_client(
     state: State<'_, ClientState>,
     student_name: String,
     student_id: String,
-    room_number: String,
     server_ip: Option<String>,
     join_code: String,
 ) -> Result<(), String> {
-    let port = parse_room_number(&room_number)?;
     let server_ip = parse_server_ip(server_ip.as_deref())?;
     let join_code = join_code.trim().to_uppercase();
     if join_code.is_empty() {
-        return Err(String::from("enter the join code shown on the teacher's screen"));
+        return Err(String::from(
+            "enter the class code shown on the teacher's screen",
+        ));
     }
+    // The code alone identifies the room — the port is derived from it.
+    let port = port_for_code(&join_code);
     let mut runtime = state
         .runtime
         .lock()
@@ -90,18 +92,6 @@ fn client_status(state: State<'_, ClientState>) -> Result<ClientSnapshot, String
             is_connected: false,
             status: String::from("Not connected"),
         }))
-}
-
-fn parse_room_number(value: &str) -> Result<u16, String> {
-    let port: u16 = value
-        .parse()
-        .map_err(|_| String::from("class number must be a valid port"))?;
-
-    if port == 0 {
-        return Err(String::from("class number must be greater than zero"));
-    }
-
-    Ok(port)
 }
 
 fn main() {

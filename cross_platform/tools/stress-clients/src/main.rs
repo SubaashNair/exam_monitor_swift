@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use exam_monitor_core::port_for_code;
 use exam_monitor_core::protocol::{identity_payload, write_packet, PacketType};
 use image::codecs::jpeg::JpegEncoder;
 use image::{ColorType, Rgb, RgbImage};
@@ -18,6 +19,7 @@ struct Config {
     height: u32,
     quality: u8,
     code: String,
+    port_explicit: bool,
 }
 
 impl Default for Config {
@@ -32,6 +34,7 @@ impl Default for Config {
             height: 405,
             quality: 60,
             code: String::new(),
+            port_explicit: false,
         }
     }
 }
@@ -44,7 +47,12 @@ struct ClientResult {
 }
 
 fn main() -> Result<()> {
-    let config = Config::from_args(env::args().skip(1))?;
+    let mut config = Config::from_args(env::args().skip(1))?;
+    // A room's port is derived from its class code, so --port is only needed
+    // to override (e.g. to mimic an older client).
+    if !config.code.is_empty() && !config.port_explicit {
+        config.port = port_for_code(&config.code);
+    }
     let addr: SocketAddr = format!("{}:{}", config.host, config.port)
         .parse()
         .context("host and port must form a valid socket address")?;
@@ -213,7 +221,10 @@ impl Config {
 
             match arg.as_str() {
                 "--host" => config.host = value()?,
-                "--port" => config.port = value()?.parse().context("--port must be a u16")?,
+                "--port" => {
+                    config.port = value()?.parse().context("--port must be a u16")?;
+                    config.port_explicit = true;
+                }
                 "--clients" => {
                     config.clients = value()?.parse().context("--clients must be a number")?
                 }

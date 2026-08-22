@@ -62,6 +62,26 @@ struct server_monitorTests {
         #expect(Set(targets).count == targets.count)
     }
 
+    /// Cross-language contract: these are the same vectors asserted by
+    /// `port_vectors_match_the_swift_implementation` in the Rust core. If this
+    /// fails, Swift and Tauri apps can no longer find each other's rooms.
+    @Test("Port derivation matches the Rust core")
+    func portForCodeMatchesRustVectors() {
+        #expect(portForCode("N7KU") == 38_242)
+        #expect(portForCode("MATH") == 34_703)
+        #expect(portForCode("AAAA") == 37_697)
+    }
+
+    @Test("Port derivation ignores case and padding, stays in range")
+    func portForCodeNormalises() {
+        #expect(portForCode("math") == portForCode("MATH"))
+        #expect(portForCode("  MATH \n") == portForCode("MATH"))
+        for code in ["N7KU", "MATH", "AAAA", "ZZ99", "7GK4"] {
+            let port = portForCode(code)
+            #expect(port >= 20_000 && port <= 44_999)
+        }
+    }
+
     @Test("Join code is 4 chars from the unambiguous alphabet")
     func joinCodeFormat() {
         let allowed = Set("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")

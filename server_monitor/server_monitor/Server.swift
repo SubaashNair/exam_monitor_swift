@@ -44,6 +44,19 @@ func generateJoinCode() -> String {
     return String((0..<4).map { _ in alphabet.randomElement()! })
 }
 
+/// Map a class code to the port its room listens on, so students only ever
+/// need the code. Must stay byte-identical to `port_for_code` in the Rust
+/// core (FNV-1a); the test suite asserts shared vectors.
+func portForCode(_ code: String) -> UInt16 {
+    var hash: UInt32 = 2_166_136_261
+    for byte in Array(code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().utf8) {
+        hash ^= UInt32(byte)
+        hash = hash &* 16_777_619
+    }
+    // 20000..=44999: above privileged ports, below the ephemeral range.
+    return UInt16(20_000 + (hash % 25_000))
+}
+
 class Server: NSObject, ObservableObject {
     private let headerSize = 8
     private var tcpListener: NWListener?
@@ -62,14 +75,22 @@ class Server: NSObject, ObservableObject {
     @Published var courseName: String = ""
     @Published var roomNumber: String = ""
     @Published var joinCode: String = ""
+    /// Shown small on the dashboard so students still on an older client can
+    /// enter it as their "class number" and connect.
+    @Published private(set) var listeningPort: Int = 0
 
-    func start(port: Int) {
+    /// Create a room: the generated class code is the only identifier, and the
+    /// port is derived from it. Re-rolls if that port is already taken.
+    func start() {
         guard !isRunning else { return }
 
-        self.port = port
-        joinCode = generateJoinCode()
+        let (code, chosenPort) = Self.pickAvailableCode()
+        joinCode = code
+        roomNumber = code
+        port = Int(chosenPort)
+        listeningPort = port
         setupTCPListener(port: port)
-        discoveryResponder = UDPDiscoveryResponder(port: UInt16(port))
+        discoveryResponder = UDPDiscoveryResponder(port: chosenPort)
         discoveryResponder?.start()
 
         staleSweepTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
@@ -77,6 +98,37 @@ class Server: NSObject, ObservableObject {
         }
 
         isRunning = true
+    }
+
+    /// Pick a code whose derived port we can actually bind, so a clash heals
+    /// itself instead of failing in front of the class.
+    private static func pickAvailableCode() -> (String, UInt16) {
+        var fallback: (String, UInt16)?
+        for _ in 0..<10 {
+            let code = generateJoinCode()
+            let candidate = portForCode(code)
+            if fallback == nil { fallback = (code, candidate) }
+            if isPortFree(candidate) { return (code, candidate) }
+        }
+        return fallback!
+    }
+
+    private static func isPortFree(_ port: UInt16) -> Bool {
+        let probe = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard probe >= 0 else { return true }
+        defer { close(probe) }
+        var reuse: Int32 = 1
+        setsockopt(probe, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        address.sin_addr.s_addr = INADDR_ANY
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(probe, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return bound == 0
     }
 
     private func dropStaleStudents() {
@@ -114,6 +166,7 @@ class Server: NSObject, ObservableObject {
             self.students.removeAll()
             self.isRunning = false
             self.joinCode = ""
+            self.listeningPort = 0
         }
     }
 

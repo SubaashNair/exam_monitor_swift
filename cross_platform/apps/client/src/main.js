@@ -5,7 +5,6 @@ const dashboardScreen = document.querySelector("#dashboard-screen");
 const form = document.querySelector("#join-form");
 const nameInput = document.querySelector("#student-name");
 const idInput = document.querySelector("#student-id");
-const roomInput = document.querySelector("#room-number");
 const joinCodeInput = document.querySelector("#join-code");
 const serverIpInput = document.querySelector("#server-ip");
 const startButton = document.querySelector("#start-button");
@@ -24,7 +23,6 @@ function isValid() {
   return (
     nameInput.value.trim().length > 0 &&
     idInput.value.trim().length >= 3 &&
-    Number.parseInt(roomInput.value, 10) > 0 &&
     joinCodeInput.value.trim().length === 4
   );
 }
@@ -61,14 +59,9 @@ function stopPolling() {
   }
 }
 
-for (const input of [nameInput, idInput, roomInput, joinCodeInput]) {
+for (const input of [nameInput, idInput, joinCodeInput]) {
   input.addEventListener("input", updateFormState);
 }
-
-roomInput.addEventListener("input", () => {
-  roomInput.value = roomInput.value.replace(/\D/g, "").slice(0, 4);
-  updateFormState();
-});
 
 joinCodeInput.addEventListener("input", () => {
   // Codes use an unambiguous uppercase alphabet; normalise as they type.
@@ -84,14 +77,13 @@ form.addEventListener("submit", async (event) => {
     await invoke("start_client", {
       studentName: nameInput.value.trim(),
       studentId: idInput.value.trim(),
-      roomNumber: roomInput.value.trim(),
       serverIp: serverIpInput.value.trim() || null,
       joinCode: joinCodeInput.value.trim()
     });
 
     summaryName.textContent = nameInput.value.trim();
     summaryId.textContent = idInput.value.trim();
-    summaryRoom.textContent = roomInput.value.trim();
+    summaryRoom.textContent = joinCodeInput.value.trim();
     setScreen("dashboard");
     startPolling();
   } catch (error) {
