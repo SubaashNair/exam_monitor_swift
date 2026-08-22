@@ -8,7 +8,8 @@ The MVP keeps the same product model:
 - The class code is the room's only identifier; its network port is derived
   from the code, so nobody types a port.
 - Client app joins with the class code and the student's name.
-- Client sends identity first.
+- Client sends identity first, including a per-install device id so a
+  reconnecting student is matched reliably even if two students share a name.
 - Client captures the screen periodically and sends JPEG frames.
 - Server dashboard displays connected students and latest screen frames.
 
@@ -83,6 +84,20 @@ projector or second display (Esc or click to exit).
 
 Students enter the code and their name — nothing else. The name is what labels
 their tile, drives search/sort, and names their evidence files.
+
+### When a student does not appear
+
+The dashboard names the reason instead of leaving you guessing — previously a
+firewall block, a mistyped code and "nobody has opened the app yet" all looked
+identical:
+
+- **`N wrong code`** — someone is typing the wrong class code. Their client now
+  says so too, instead of showing a raw socket error and retrying forever.
+- **`N can't reach room`** — devices found the room over UDP but no TCP
+  connection followed. That is a firewall or blocked port, not a wrong code.
+- **`⚠ screen blocked`** on a tile — that student's OS refused screen capture.
+  Without this the tile would keep updating with a bare desktop and look
+  perfectly monitored.
 
 ### Students on an older client
 

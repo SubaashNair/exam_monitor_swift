@@ -1,6 +1,9 @@
-use crate::capture::capture_primary_screen_jpeg;
+use crate::capture::{capture_primary_screen_jpeg, screen_capture_permitted};
 use crate::discovery::{discovery_targets, DISCOVER_MESSAGE, SERVER_MESSAGE};
-use crate::protocol::{identity_payload, write_packet, PacketType};
+use crate::protocol::{
+    identity_payload, read_packet, write_packet, PacketType, CLIENT_NO_SCREEN_PERMISSION,
+    REJECT_WRONG_CODE,
+};
 use serde::Serialize;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, UdpSocket};
@@ -66,6 +69,10 @@ impl ClientRuntime {
                                     eprintln!("CLIENT: connected to {addr}");
                                     set_status(&status, "Connected, sending identity...");
 
+                                    // A blocked screen would otherwise stream a
+                                    // wallpaper and look perfectly monitored.
+                                    let capture_ok = screen_capture_permitted();
+
                                     let identity =
                                         identity_payload(&join_code, &student_name, &student_id);
                                     if let Err(error) =
@@ -79,6 +86,36 @@ impl ClientRuntime {
                                         eprintln!("CLIENT: failed to send identity: {error}");
                                         thread::sleep(Duration::from_secs(1));
                                         continue;
+                                    }
+
+                                    // The server answers only to refuse; a silent
+                                    // socket here means we are accepted.
+                                    if let Some(reason) = read_rejection(&mut stream) {
+                                        if reason == REJECT_WRONG_CODE {
+                                            set_status(
+                                                &status,
+                                                "Wrong class code — check it with your teacher, \
+                                                 then press Stop and rejoin.",
+                                            );
+                                            eprintln!("CLIENT: rejected, wrong class code");
+                                            running.store(false, Ordering::SeqCst);
+                                            break;
+                                        }
+                                    }
+
+                                    if !capture_ok {
+                                        let _ = write_packet(
+                                            &mut stream,
+                                            PacketType::Message,
+                                            CLIENT_NO_SCREEN_PERMISSION.as_bytes(),
+                                        );
+                                        set_status(
+                                            &status,
+                                            "Screen recording is blocked — allow it in System \
+                                             Settings > Privacy & Security > Screen Recording, \
+                                             then restart this app.",
+                                        );
+                                        eprintln!("CLIENT: screen capture permission denied");
                                     }
 
                                     set_status(
@@ -232,8 +269,11 @@ fn discover_server(port: u16, running: &Arc<AtomicBool>) -> Option<IpAddr> {
         eprintln!("CLIENT: failed to set UDP read timeout: {error}");
     }
 
-    let targets = discovery_targets(port);
-    let localhost = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    // Probing loopback over UDP (rather than just opening a TCP socket to it)
+    // means only a real Exam Guard server answers. A plain TCP connect would
+    // accept *any* unrelated local service that happened to hold this port.
+    let mut targets = discovery_targets(port);
+    targets.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
     let mut probe_error_logged = false;
     let mut buffer = [0_u8; 64];
 
@@ -242,12 +282,6 @@ fn discover_server(port: u16, running: &Arc<AtomicBool>) -> Option<IpAddr> {
     // left deaf gaps where a freshly started room went unnoticed for up to
     // 8 seconds; continuous listening caps connect latency at ~1 second.
     while running.load(Ordering::SeqCst) {
-        // Server on this machine? A refused connect returns instantly, so
-        // this stays cheap when there isn't one.
-        if TcpStream::connect_timeout(&localhost, Duration::from_millis(300)).is_ok() {
-            return Some(localhost.ip());
-        }
-
         for target in &targets {
             if let Err(error) = socket.send_to(DISCOVER_MESSAGE, target) {
                 if !probe_error_logged {
@@ -279,6 +313,19 @@ fn discover_server(port: u16, running: &Arc<AtomicBool>) -> Option<IpAddr> {
     }
 
     None
+}
+
+/// Look for a short refusal from the server. Returns `None` on the normal
+/// path (the server stays silent), so an accepted client only pauses briefly.
+fn read_rejection(stream: &mut TcpStream) -> Option<String> {
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(400)));
+    let packet = read_packet(stream).ok();
+    let _ = stream.set_read_timeout(None);
+
+    packet.and_then(|packet| match packet.packet_type {
+        PacketType::Message => Some(String::from_utf8_lossy(&packet.payload).to_string()),
+        _ => None,
+    })
 }
 
 fn set_status(status: &Arc<Mutex<String>>, value: impl Into<String>) {

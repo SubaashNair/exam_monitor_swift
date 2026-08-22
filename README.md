@@ -52,6 +52,9 @@ disconnect tombstones, per-room class code, evidence logging):
 The code is both the room's address and its password: the network port is
 derived from it, so nobody types a port number.
 
+If a student never appears, the dashboard now says why — `wrong code`,
+`can't reach room` (firewall), or `⚠ screen blocked` on their tile.
+
 **Students on an older client (v0.1.10–v0.1.12)** still work — their join screen
 also asks for a "Class Number", so give them the small `port …` value shown
 under the code on the dashboard.

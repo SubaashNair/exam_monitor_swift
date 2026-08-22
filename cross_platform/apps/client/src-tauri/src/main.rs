@@ -2,10 +2,48 @@
 // the packaged .exe is built for the console subsystem and pops a terminal.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use exam_monitor_core::protocol::DEVICE_ID_PREFIX;
 use exam_monitor_core::{port_for_code, ClientRuntime, ClientSnapshot};
 use std::net::IpAddr;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
+
+/// A random id generated once per installation and reused forever.
+///
+/// Students are only asked for a name, and two of them can share one. This
+/// gives the server something unique to match a reconnecting student on, so
+/// one student never inherits another's tile or evidence.
+fn device_id(app: &AppHandle) -> String {
+    let Ok(dir) = app.path().app_data_dir() else {
+        return String::new();
+    };
+    let path = dir.join("device-id");
+
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let existing = existing.trim();
+        if !existing.is_empty() {
+            return format!("{DEVICE_ID_PREFIX}{existing}");
+        }
+    }
+
+    // Time-seeded xorshift: unique per install without adding a uuid crate.
+    let mut seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(1)
+        | 1;
+    let mut id = String::new();
+    for _ in 0..4 {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        id.push_str(&format!("{:04x}", (seed & 0xffff) as u16));
+    }
+
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(&path, &id);
+    format!("{DEVICE_ID_PREFIX}{id}")
+}
 
 #[derive(Default)]
 struct ClientState {
@@ -14,6 +52,7 @@ struct ClientState {
 
 #[tauri::command(rename_all = "camelCase")]
 fn start_client(
+    app: AppHandle,
     state: State<'_, ClientState>,
     student_name: String,
     server_ip: Option<String>,
@@ -39,9 +78,9 @@ fn start_client(
 
     *runtime = Some(ClientRuntime::start(
         student_name,
-        // Students are no longer asked for an ID; the core keeps the field so
-        // the wire format (and older clients) stay unchanged.
-        String::new(),
+        // Students are not asked for an ID; a per-install device id goes in
+        // that slot so reconnects match reliably even with duplicate names.
+        device_id(&app),
         port,
         server_ip,
         join_code,

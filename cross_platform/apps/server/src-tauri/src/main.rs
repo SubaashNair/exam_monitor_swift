@@ -125,6 +125,8 @@ fn server_status(state: State<'_, ServerState>) -> Result<ServerSnapshot, String
             log_dir: None,
             join_code: String::new(),
             port: 0,
+            wrong_code_attempts: 0,
+            unreachable_devices: 0,
         }))
 }
 

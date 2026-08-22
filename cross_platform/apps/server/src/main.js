@@ -9,7 +9,6 @@ const createButton = document.querySelector("#create-button");
 const roomError = document.querySelector("#room-error");
 const stopButton = document.querySelector("#stop-button");
 const title = document.querySelector("#dashboard-title");
-const subtitle = document.querySelector("#dashboard-subtitle");
 const emptyState = document.querySelector("#empty-state");
 const grid = document.querySelector("#student-grid");
 const searchInput = document.querySelector("#student-search");
@@ -17,6 +16,9 @@ const logDir = document.querySelector("#log-dir");
 const joinCodeChip = document.querySelector("#join-code-chip");
 const joinCodeValue = document.querySelector("#join-code");
 const joinPort = document.querySelector("#join-port");
+const examOther = document.querySelector("#exam-other");
+const courseOther = document.querySelector("#course-other");
+const statusBadges = document.querySelector("#status-badges");
 const bannerCode = document.querySelector("#banner-code");
 const bannerPort = document.querySelector("#banner-port");
 const bannerCopy = document.querySelector("#banner-copy");
@@ -37,10 +39,21 @@ let columns = 1;
 let pollTimer = null;
 let latestStudents = [];
 
+// A dropdown value, or whatever was typed when "Other…" is chosen.
+function fieldValue(select, other) {
+  return select.value === "__other" ? other.value.trim() : select.value.trim();
+}
+
+function syncOther(select, other) {
+  const isOther = select.value === "__other";
+  other.hidden = !isOther;
+  if (!isOther) other.value = "";
+}
+
 function isValid() {
   return (
-    examInput.value.trim().length > 0 &&
-    courseInput.value.trim().length > 0
+    fieldValue(examInput, examOther).length > 0 &&
+    fieldValue(courseInput, courseOther).length > 0
   );
 }
 
@@ -113,7 +126,8 @@ async function pollStatus() {
     return;
   }
 
-  title.textContent = status.exam_name || "Exam Monitoring";
+  const heading = [status.exam_name, status.course_name].filter(Boolean).join(" : ");
+  title.textContent = heading ? heading.toUpperCase() : "EXAM MONITORING";
   latestStudents = status.students;
 
   const connected = latestStudents.filter((s) => s.connected).length;
@@ -122,13 +136,15 @@ async function pollStatus() {
   ).length;
   const offline = latestStudents.length - connected;
 
-  const parts = [];
-  if (status.course_name) parts.push(status.course_name);
-  if (status.join_code) parts.push(`Class ${status.join_code}`);
-  parts.push(`${connected} connected`);
-  if (noSignal > 0) parts.push(`${noSignal} no-signal`);
-  if (offline > 0) parts.push(`${offline} disconnected`);
-  subtitle.textContent = parts.join(" · ");
+  // Problems only appear when they exist, so any badge beyond the green one
+  // is itself the alert — including the two that explain an *absent* student.
+  renderBadges([
+    { cls: connected > 0 ? "green" : "idle", count: connected, label: "connected" },
+    { cls: "amber", count: noSignal, label: "no signal" },
+    { cls: "red", count: offline, label: "disconnected" },
+    { cls: "purple", count: status.wrong_code_attempts, label: "wrong code" },
+    { cls: "slate", count: status.unreachable_devices, label: "can't reach room" }
+  ]);
 
   logDir.textContent = status.log_dir ? `Saving evidence to: ${status.log_dir}` : "";
 
@@ -148,6 +164,19 @@ async function pollStatus() {
 
   renderStudents();
   refreshDialog();
+}
+
+function renderBadges(rows) {
+  const visible = rows.filter((row) => row.count > 0 || row.cls === "idle");
+  statusBadges.innerHTML = "";
+  for (const row of visible) {
+    const badge = document.createElement("span");
+    badge.className = `badge ${row.cls}`;
+    const count = document.createElement("b");
+    count.textContent = row.count;
+    badge.append(count, document.createTextNode(` ${row.label}`));
+    statusBadges.append(badge);
+  }
 }
 
 // Keyed reconciliation: reuse existing tiles and only touch what changed, so
@@ -238,9 +267,14 @@ function updateTile(entry, student, state) {
   }
 
   entry.name.textContent = student.name;
-  entry.sid.textContent = student.student_id;
-  entry.sid.hidden = !student.student_id;
-  entry.statusEl.textContent = statusLabel(student, state);
+  // A generated device id identifies the machine, not the student — never show it.
+  const shownId = student.student_id.startsWith("dev:") ? "" : student.student_id;
+  entry.sid.textContent = shownId;
+  entry.sid.hidden = !shownId;
+  entry.tile.classList.toggle("blocked", student.capture_blocked === true);
+  entry.statusEl.textContent = student.capture_blocked
+    ? "⚠ screen blocked"
+    : statusLabel(student, state);
   entry.dismiss.hidden = state !== "offline";
 }
 
@@ -260,7 +294,11 @@ function refreshDialog() {
   }
 
   dialogName.textContent = student.name;
-  dialogId.textContent = student.student_id;
+  dialogId.textContent = student.capture_blocked
+    ? "⚠ this student's screen recording permission is blocked"
+    : student.student_id.startsWith("dev:")
+      ? ""
+      : student.student_id;
 
   const src = student.image_data_url || null;
   if (src) {
@@ -317,9 +355,18 @@ function setProjector(open) {
   projector.classList.toggle("hidden", !open);
 }
 
-for (const input of [examInput, courseInput]) {
+for (const input of [examInput, courseInput, examOther, courseOther]) {
   input.addEventListener("input", updateFormState);
 }
+
+examInput.addEventListener("change", () => {
+  syncOther(examInput, examOther);
+  updateFormState();
+});
+courseInput.addEventListener("change", () => {
+  syncOther(courseInput, courseOther);
+  updateFormState();
+});
 
 joinCodeChip.addEventListener("click", copyClassCode);
 bannerCopy.addEventListener("click", copyClassCode);
@@ -337,8 +384,8 @@ form.addEventListener("submit", async (event) => {
 
   try {
     await invoke("start_server", {
-      examName: examInput.value.trim(),
-      courseName: courseInput.value.trim()
+      examName: fieldValue(examInput, examOther),
+      courseName: fieldValue(courseInput, courseOther)
     });
 
     setScreen("dashboard");

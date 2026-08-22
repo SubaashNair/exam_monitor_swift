@@ -3,6 +3,32 @@ use image::{imageops::FilterType, DynamicImage, ImageOutputFormat};
 use screenshots::Screen;
 use std::io::Cursor;
 
+/// Whether the OS will actually hand us the screen.
+///
+/// macOS is the reason this exists: when Screen Recording is denied,
+/// `CGDisplayCreateImage` still returns a perfectly valid image — of the
+/// desktop with every window stripped out — so capture "succeeds" and the
+/// proctor silently watches a wallpaper. Asking the OS directly is the only
+/// reliable way to tell.
+#[cfg(target_os = "macos")]
+pub fn screen_capture_permitted() -> bool {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGPreflightScreenCaptureAccess() -> bool;
+        fn CGRequestScreenCaptureAccess() -> bool;
+    }
+
+    // Preflight first; if it has never been asked, request it so the student
+    // gets the system prompt instead of silently sharing nothing.
+    unsafe { CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() }
+}
+
+/// Windows and Linux have no equivalent gate for desktop capture.
+#[cfg(not(target_os = "macos"))]
+pub fn screen_capture_permitted() -> bool {
+    true
+}
+
 pub fn capture_primary_screen_jpeg(quality: u8, target_width: u32) -> Result<Vec<u8>> {
     let screens = Screen::all().context("failed to enumerate screens")?;
     let screen = screens

@@ -1,6 +1,20 @@
 use std::io::{self, Read, Write};
 
 pub const HEADER_SIZE: usize = 8;
+
+/// Sent by the server as a `Message` packet just before it closes a
+/// connection that presented the wrong class code. Without it the client can
+/// only report a raw socket error, which looks like a network fault.
+pub const REJECT_WRONG_CODE: &str = "WRONG_CODE";
+
+/// Sent by the client as a `Message` packet when the OS refuses screen
+/// capture. Without it a blocked student looks perfectly monitored while the
+/// proctor is really watching an empty desktop.
+pub const CLIENT_NO_SCREEN_PERMISSION: &str = "NO_SCREEN_PERMISSION";
+
+/// Prefix marking a generated per-install device id rather than a real
+/// student ID, so the server can dedup on it without displaying it.
+pub const DEVICE_ID_PREFIX: &str = "dev:";
 const MAGIC: &[u8; 2] = b"HE";
 const MAX_PAYLOAD_SIZE: u32 = 20 * 1024 * 1024;
 

@@ -16,12 +16,35 @@
 
         <form id="room-form" class="form">
           <label>
-            <span>Exam Name</span>
-            <input id="exam-name" placeholder="e.g. Final Examination" />
+            <span>Examination</span>
+            <select id="exam-name">
+              <option value="" disabled selected>Choose an examination…</option>
+              <option>Final Examination</option>
+              <option>Mid-Semester Examination</option>
+              <option>Knowledge Assessment (KA)</option>
+              <option>Practical Assessment (PA)</option>
+              <option>Quiz / Kuiz</option>
+              <option>Mock Examination</option>
+              <option>Retake / Resit</option>
+              <option>Coding Challenge</option>
+              <option value="__other">Other…</option>
+            </select>
+            <input id="exam-other" class="other-input" placeholder="Type the examination name" hidden />
           </label>
           <label>
             <span>Course / Module</span>
-            <input id="course-name" placeholder="e.g. CS3010 Distributed Systems" />
+            <select id="course-name">
+              <option value="" disabled selected>Choose a course…</option>
+              <option value="C01 — Responsive Website Development">C01 — Responsive Website Development</option>
+              <option value="C02 — Web Application with Third Party API Development">C02 — Web Application with Third Party API Development</option>
+              <option value="C03 — Offline Mobile Application Development">C03 — Offline Mobile Application Development</option>
+              <option value="C04 — Mobile Application with Third Party API Development">C04 — Mobile Application with Third Party API Development</option>
+              <option value="C05 — Data Analysis and Visualisation">C05 — Data Analysis and Visualisation</option>
+              <option value="C06 — Database Design and Architecture">C06 — Database Design and Architecture</option>
+              <option value="C07 — Software Development Life Cycle">C07 — Software Development Life Cycle</option>
+              <option value="__other">Other…</option>
+            </select>
+            <input id="course-other" class="other-input" placeholder="Type the course or module" hidden />
           </label>
           <button id="create-button" type="submit" disabled>Start Monitoring</button>
           <small class="form-hint">A class code for students is created when you start.</small>
@@ -32,23 +55,24 @@
 
     <main id="dashboard-screen" class="dashboard hidden">
       <header class="toolbar">
-        <section>
-          <h1 id="dashboard-title">Exam Monitoring</h1>
-          <p id="dashboard-subtitle">0 connected</p>
-        </section>
+        <h1 id="dashboard-title">Exam Monitoring</h1>
 
-        <div class="toolbar-actions">
+        <div class="tb-main">
           <button id="join-code-chip" class="join-code-chip" type="button" hidden title="Click to copy">
             <span class="jc-label">Class code</span>
             <strong id="join-code">----</strong>
             <span id="join-port" class="jc-port"></span>
           </button>
-          <input id="student-search" class="search" type="search" placeholder="Search name or ID" />
-          <button id="remove-column" class="icon-button" type="button">-</button>
-          <span id="column-label">1 column</span>
-          <button id="add-column" class="icon-button" type="button">+</button>
+          <div id="status-badges" class="status-badges"></div>
+          <div class="seg">
+            <button id="remove-column" class="seg-btn" type="button">&minus;</button>
+            <span id="column-label">1 column</span>
+            <button id="add-column" class="seg-btn" type="button">+</button>
+          </div>
           <button id="stop-button" class="danger" type="button">Stop Monitoring</button>
         </div>
+
+        <input id="student-search" class="search" type="search" placeholder="Search name" />
       </header>
 
       <section id="empty-state" class="empty">

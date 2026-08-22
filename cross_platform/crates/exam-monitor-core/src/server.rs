@@ -1,10 +1,13 @@
 use crate::discovery::{discovery_targets, DISCOVER_MESSAGE, SERVER_MESSAGE};
 use crate::logging::SessionLogger;
-use crate::protocol::{parse_identity, read_packet, PacketType};
+use crate::protocol::{
+    parse_identity, read_packet, write_packet, PacketType, CLIENT_NO_SCREEN_PERMISSION,
+    DEVICE_ID_PREFIX, REJECT_WRONG_CODE,
+};
 use base64::{engine::general_purpose, Engine};
 use serde::Serialize;
-use std::collections::HashMap;
-use std::net::{Shutdown, TcpListener, TcpStream, UdpSocket};
+use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -23,6 +26,36 @@ const MAX_CONNECTIONS: usize = 64;
 const EVIDENCE_INTERVAL: Duration = Duration::from_secs(60);
 
 type Connections = Arc<Mutex<HashMap<u64, TcpStream>>>;
+type Diagnostics = Arc<Mutex<RoomDiagnostics>>;
+
+/// A device is treated as "still trying" for this long after its last probe.
+const PROBE_MEMORY: Duration = Duration::from_secs(60);
+
+/// Why a student might be missing from the grid. Without this the teacher
+/// cannot tell a wrong code from a blocked firewall from an empty room —
+/// all three look identical (nothing).
+#[derive(Default)]
+struct RoomDiagnostics {
+    /// Connections dropped for presenting the wrong class code.
+    wrong_code: u64,
+    /// Devices that asked where the room is, and when they last asked.
+    probed: HashMap<IpAddr, Instant>,
+    /// Devices that got as far as a TCP connection.
+    connected_peers: HashSet<IpAddr>,
+}
+
+impl RoomDiagnostics {
+    /// Devices that found the room over UDP but never completed a TCP
+    /// connection — the signature of a firewall or blocked port.
+    fn unreachable(&self) -> usize {
+        self.probed
+            .iter()
+            .filter(|(ip, at)| {
+                at.elapsed() < PROBE_MEMORY && !self.connected_peers.contains(ip)
+            })
+            .count()
+    }
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct StudentSnapshot {
@@ -36,6 +69,9 @@ pub struct StudentSnapshot {
     /// dismisses, instead of the student silently vanishing from the grid.
     pub connected: bool,
     pub disconnected_at_ms: Option<u128>,
+    /// The student's OS refused screen capture, so their frames show a bare
+    /// desktop. Without this flag they look perfectly monitored.
+    pub capture_blocked: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -52,6 +88,12 @@ pub struct ServerSnapshot {
     /// Port derived from the join code. Surfaced only so the dashboard can
     /// show it for students still on an older client that asks for a number.
     pub port: u16,
+    /// Connections rejected for the wrong class code — tells the teacher to
+    /// re-read the code rather than wonder why nobody is joining.
+    pub wrong_code_attempts: u64,
+    /// Devices that found the room but could not connect (firewall/blocked
+    /// port). Distinguishes "blocked" from "nobody has opened the app yet".
+    pub unreachable_devices: usize,
 }
 
 pub struct ServerRuntime {
@@ -66,6 +108,7 @@ pub struct ServerRuntime {
     log_dir: Option<String>,
     session_dir: Option<PathBuf>,
     clear_on_finish: Arc<AtomicBool>,
+    diagnostics: Diagnostics,
     workers: Vec<JoinHandle<()>>,
 }
 
@@ -81,6 +124,7 @@ impl ServerRuntime {
         let running = Arc::new(AtomicBool::new(true));
         let students = Arc::new(Mutex::new(Vec::new()));
         let connections: Connections = Arc::new(Mutex::new(HashMap::new()));
+        let diagnostics: Diagnostics = Arc::new(Mutex::new(RoomDiagnostics::default()));
 
         // Best-effort evidence logging; a failure here must not stop the exam.
         let logger = log_base_dir.and_then(|base| {
@@ -103,15 +147,25 @@ impl ServerRuntime {
             let connections = Arc::clone(&connections);
             let logger = logger.clone();
             let join_code = join_code.clone();
+            let diagnostics = Arc::clone(&diagnostics);
 
             thread::spawn(move || {
-                run_tcp_listener(port, running, students, connections, logger, join_code)
+                run_tcp_listener(
+                    port,
+                    running,
+                    students,
+                    connections,
+                    logger,
+                    join_code,
+                    diagnostics,
+                )
             })
         };
 
         let broadcast_worker = {
             let running = Arc::clone(&running);
-            thread::spawn(move || run_udp_discovery(port, running))
+            let diagnostics = Arc::clone(&diagnostics);
+            thread::spawn(move || run_udp_discovery(port, running, diagnostics))
         };
 
         let mut workers = vec![accept_worker, broadcast_worker];
@@ -136,6 +190,7 @@ impl ServerRuntime {
             log_dir,
             session_dir,
             clear_on_finish: Arc::new(AtomicBool::new(false)),
+            diagnostics,
             workers,
         }
     }
@@ -219,6 +274,16 @@ impl ServerRuntime {
             log_dir: self.log_dir.clone(),
             join_code: self.join_code.clone(),
             port: self.port,
+            wrong_code_attempts: self
+                .diagnostics
+                .lock()
+                .map(|d| d.wrong_code)
+                .unwrap_or(0),
+            unreachable_devices: self
+                .diagnostics
+                .lock()
+                .map(|d| d.unreachable())
+                .unwrap_or(0),
         }
     }
 }
@@ -272,6 +337,7 @@ fn run_tcp_listener(
     connections: Connections,
     logger: Option<Arc<SessionLogger>>,
     join_code: String,
+    diagnostics: Diagnostics,
 ) {
     let join_code = Arc::new(join_code);
     let listener = match TcpListener::bind(("0.0.0.0", port)) {
@@ -301,6 +367,10 @@ fn run_tcp_listener(
                 let id = next_id;
                 next_id += 1;
                 eprintln!("SERVER: accepted TCP connection {id} from {peer_addr}");
+                // Reaching TCP means this device is not firewall-blocked.
+                if let Ok(mut diag) = diagnostics.lock() {
+                    diag.connected_peers.insert(peer_addr.ip());
+                }
 
                 if let Err(error) = stream.set_nonblocking(false) {
                     eprintln!("SERVER: failed to set connection {id} blocking mode: {error}");
@@ -318,8 +388,18 @@ fn run_tcp_listener(
                 let connections = Arc::clone(&connections);
                 let logger = logger.clone();
                 let join_code = Arc::clone(&join_code);
+                let diagnostics = Arc::clone(&diagnostics);
                 thread::spawn(move || {
-                    handle_student(id, stream, running, students, connections, logger, join_code)
+                    handle_student(
+                        id,
+                        stream,
+                        running,
+                        students,
+                        connections,
+                        logger,
+                        join_code,
+                        diagnostics,
+                    )
                 });
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -333,7 +413,7 @@ fn run_tcp_listener(
     }
 }
 
-fn run_udp_discovery(port: u16, running: Arc<AtomicBool>) {
+fn run_udp_discovery(port: u16, running: Arc<AtomicBool>, diagnostics: Diagnostics) {
     // Bind to the room port so client "discover" probes reach us. Fall back to
     // an ephemeral port (beacon-only mode) if the room port is taken.
     let socket = match UdpSocket::bind(("0.0.0.0", port)) {
@@ -360,7 +440,11 @@ fn run_udp_discovery(port: u16, running: Arc<AtomicBool>) {
         eprintln!("SERVER: failed to set UDP read timeout: {error}");
     }
 
-    let targets = discovery_targets(port);
+    let mut targets = discovery_targets(port);
+    // Beacon to loopback as well. A broadcast is not reliably delivered back
+    // to a socket on the same host, so without this a client that grabbed the
+    // room port before us (server and client on one machine) never hears us.
+    targets.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
     eprintln!("SERVER: announcing room {port} to {targets:?}");
 
     let mut buffer = [0_u8; 64];
@@ -387,6 +471,11 @@ fn run_udp_discovery(port: u16, running: Arc<AtomicBool>) {
         match socket.recv_from(&mut buffer) {
             Ok((count, source)) if &buffer[..count] == DISCOVER_MESSAGE => {
                 eprintln!("SERVER: discovery probe from {source}");
+                // Remember who is looking; if they never reach TCP, something
+                // between us is blocking the connection.
+                if let Ok(mut diag) = diagnostics.lock() {
+                    diag.probed.insert(source.ip(), Instant::now());
+                }
                 if let Err(error) = socket.send_to(SERVER_MESSAGE, source) {
                     eprintln!("SERVER: failed to answer probe from {source}: {error}");
                 }
@@ -411,6 +500,7 @@ fn handle_student(
     connections: Connections,
     logger: Option<Arc<SessionLogger>>,
     join_code: Arc<String>,
+    diagnostics: Diagnostics,
 ) {
     // When a room has a join code, a connection must present it before it can
     // register — this is what stops a bystander who only knows the room number
@@ -438,6 +528,16 @@ fn handle_student(
                 let (code, name, student_id) = parse_identity(&packet.payload);
                 if require_code && code != *join_code {
                     eprintln!("SERVER: rejecting connection {id}: wrong join code");
+                    if let Ok(mut diag) = diagnostics.lock() {
+                        diag.wrong_code = diag.wrong_code.saturating_add(1);
+                    }
+                    // Tell the student *why* before hanging up, so they see
+                    // "wrong class code" instead of a generic socket error.
+                    let _ = write_packet(
+                        &mut stream,
+                        PacketType::Message,
+                        REJECT_WRONG_CODE.as_bytes(),
+                    );
                     break;
                 }
                 // A reconnecting student replaces their own tombstone rather
@@ -492,7 +592,14 @@ fn handle_student(
                     eprintln!("SERVER: received {received_frames} frame(s) from connection {id}");
                 }
             }
-            PacketType::Message => {}
+            PacketType::Message => {
+                if packet.payload == CLIENT_NO_SCREEN_PERMISSION.as_bytes() {
+                    eprintln!("SERVER: connection {id} reports blocked screen capture");
+                    update_student(&students, id, |student| {
+                        student.capture_blocked = true;
+                    });
+                }
+            }
         }
     }
 
@@ -520,6 +627,16 @@ fn handle_student(
 /// otherwise their name. Clients are not required to collect a student ID.
 fn identity_key(name: &str, student_id: &str) -> String {
     if student_id.is_empty() {
+        name.trim().to_string()
+    } else {
+        student_id.to_string()
+    }
+}
+
+/// Filename-friendly label: a real student ID if the client sent one, else
+/// the student's name. Generated device ids are for matching, not reading.
+fn evidence_label(name: &str, student_id: &str) -> String {
+    if student_id.is_empty() || student_id.starts_with(DEVICE_ID_PREFIX) {
         name.trim().to_string()
     } else {
         student_id.to_string()
@@ -567,6 +684,7 @@ fn upsert_student(
                 last_update_ms: now,
                 connected: true,
                 disconnected_at_ms: None,
+                capture_blocked: false,
             });
         }
 
@@ -606,11 +724,11 @@ fn run_evidence_logger(
                         .iter()
                         .filter(|student| student.connected)
                         .filter_map(|student| {
-                            // Prefer a stable, human-meaningful filename; the
-                            // connection id changes on reconnect so it is the
-                            // last resort only.
-                            let label = match identity_key(&student.name, &student.student_id) {
-                                key if !key.is_empty() => key,
+                            // Prefer a stable, human-meaningful filename. A
+                            // generated device id dedups well but reads
+                            // terribly, so the name wins for filenames.
+                            let label = match evidence_label(&student.name, &student.student_id) {
+                                label if !label.is_empty() => label,
                                 _ => format!("id{}", student.id),
                             };
                             student
@@ -782,6 +900,55 @@ mod tests {
         let students = runtime.snapshot().students;
         assert_eq!(students.len(), 1);
         assert_eq!(students[0].name, "Unknown", "must not render a blank tile");
+    }
+
+    /// A mistyped code used to produce a silent connect/disconnect loop with
+    /// no explanation for the student and no signal at all for the teacher.
+    #[test]
+    fn wrong_code_is_explained_to_the_student_and_counted_for_the_teacher() {
+        let port = 42_370;
+        let runtime = ServerRuntime::start(
+            String::from("Exam"),
+            String::from("Course"),
+            port.to_string(),
+            port,
+            None,
+            String::from("7GK4"),
+        );
+
+        thread::sleep(Duration::from_millis(200));
+
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write_packet(
+            &mut stream,
+            PacketType::Name,
+            &identity_payload("XXXX", "Mallory", ""),
+        )
+        .unwrap();
+
+        // The student's client can read the reason instead of guessing from a
+        // broken pipe.
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let packet = read_packet(&mut stream).expect("server should explain the refusal");
+        assert_eq!(packet.packet_type, PacketType::Message);
+        assert_eq!(packet.payload, REJECT_WRONG_CODE.as_bytes());
+
+        // And the teacher can see that someone is trying with a bad code.
+        thread::sleep(Duration::from_millis(150));
+        let snapshot = runtime.snapshot();
+        assert!(snapshot.students.is_empty(), "must not register");
+        assert_eq!(snapshot.wrong_code_attempts, 1);
+    }
+
+    #[test]
+    fn evidence_label_prefers_a_readable_name_over_a_device_id() {
+        assert_eq!(evidence_label("Ada", "STU-1"), "STU-1");
+        assert_eq!(evidence_label("Ada", "dev:abc123"), "Ada");
+        assert_eq!(evidence_label("Ada", ""), "Ada");
+        // ...but dedup still keys on the device id, which is the whole point.
+        assert_eq!(identity_key("Ada", "dev:abc123"), "dev:abc123");
     }
 
     #[test]
