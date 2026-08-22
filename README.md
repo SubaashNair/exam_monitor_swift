@@ -29,12 +29,14 @@ not build the Swift apps.
 
 ## Screenshots
 
-**Server — proctor dashboard** (live student grid, connection duration,
-disconnect tombstones, per-room class code, evidence logging):
+**Server — proctor dashboard.** The examination and course become the title;
+the class code sits beside live status badges. Problem tiles sort to the front,
+and a badge appears only when it has something to report — including `wrong
+code` and `can't reach room`, which explain a student who never shows up:
 
 ![Server dashboard](docs/screenshots/server-dashboard.png)
 
-**Client — student join screen:**
+**Client — student join screen.** Two fields: the class code and their name.
 
 ![Client join screen](docs/screenshots/client-join.png)
 
