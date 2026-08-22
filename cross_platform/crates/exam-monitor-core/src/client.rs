@@ -339,6 +339,37 @@ mod tests {
     use super::*;
     use crate::server::ServerRuntime;
 
+    /// The everyday ordering: the teacher starts the room, then a student
+    /// opens the client. Here the server owns the room port, so it answers
+    /// the client's probe directly and discovery should be near-instant.
+    #[test]
+    fn discovery_finds_a_room_that_is_already_running() {
+        let port = 42_372;
+        let mut runtime = ServerRuntime::start(
+            String::from("Exam"),
+            String::from("Course"),
+            port.to_string(),
+            port,
+            None,
+            String::new(),
+        );
+        thread::sleep(Duration::from_millis(300));
+
+        let running = Arc::new(AtomicBool::new(true));
+        let started = std::time::Instant::now();
+        let found = discover_server(port, &running);
+        let elapsed = started.elapsed();
+
+        runtime.stop();
+        running.store(false, Ordering::SeqCst);
+
+        assert!(found.is_some(), "a running room must be discoverable");
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "discovery took {elapsed:?}; students should not wait this long"
+        );
+    }
+
     #[test]
     fn discovery_finds_server_started_after_search_began() {
         let port = 42_357;
